@@ -1,0 +1,6 @@
+﻿ciudad,barrio,modelo,centro_logistico,paquetes,distancia_troncal_km,km_recorridos,numero_viajes,emisiones_co2_kg,costo_total_eur
+barcelona,El Carmel,M1: Furgoneta Combustión desde CC,DCT9 Amazon Logistics,52,4.030748959731095,17.486099102251487,1,3.846941802495327,22.17555295240075
+barcelona,El Carmel,M2: Furgoneta Eléctrica desde CC,DCT9 Amazon Logistics,52,4.030748959731095,17.486099102251487,1,0.0,19.234709012476635
+barcelona,El Carmel,M3: CC -> Microhub -> Bicicleta,DCT9 Amazon Logistics,52,4.030748959731095,18.89978927966988,4,1.7735295422816817,60.007879991976054
+barcelona,El Carmel,M4: CC -> PUDO -> Entrega a pie,DCT9 Amazon Logistics,52,4.030748959731095,69.64205054743684,6,1.7735295422816817,193.84248107169037
+barcelona,El Carmel,M5: CC -> PUDO -> Recogida Cliente,DCT9 Amazon Logistics,52,4.030748959731095,69.64205054743684,53,3.313043357981048,29.627674063757986

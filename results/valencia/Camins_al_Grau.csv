@@ -1,0 +1,6 @@
+﻿ciudad,barrio,modelo,centro_logistico,paquetes,distancia_troncal_km,km_recorridos,numero_viajes,emisiones_co2_kg,costo_total_eur
+valencia,Camins al Grau,M1: Furgoneta Combustión desde CC,Amazon VLC1,133,59.6948038565332,378.0338657782525,3,83.16745047121555,479.4156752369656
+valencia,Camins al Grau,M2: Furgoneta Eléctrica desde CC,Amazon VLC1,133,59.6948038565332,378.0338657782525,3,0.0,415.8372523560777
+valencia,Camins al Grau,M3: CC -> Microhub -> Bicicleta,Amazon VLC1,133,59.6948038565332,142.23440674797774,8,26.26571369687461,122.71236245753678
+valencia,Camins al Grau,M4: CC -> PUDO -> Entrega a pie,Amazon VLC1,133,59.6948038565332,318.9254172115173,13,26.26571369687461,652.3208154667489
+valencia,Camins al Grau,M5: CC -> PUDO -> Recogida Cliente,Amazon VLC1,133,59.6948038565332,318.9254172115173,134,31.254108934335882,120.22532347087989
