@@ -1,6 +1,6 @@
 ﻿ciudad,barrio,modelo,centro_logistico,paquetes,distancia_troncal_km,km_recorridos,numero_viajes,emisiones_co2_kg,costo_total_eur
-madrid,Moratalaz,M1: Furgoneta Combustión desde CC,Amazon Logistics DMA3,72,4.614955533709756,28.97969916631368,2,6.37553381658901,36.7515275790978
-madrid,Moratalaz,M2: Furgoneta Eléctrica desde CC,Amazon Logistics DMA3,72,4.614955533709756,28.97969916631368,2,0.0,31.877669082945047
-madrid,Moratalaz,M3: CC -> Microhub -> Bicicleta,Amazon Logistics DMA3,72,4.614955533709756,21.32776965361537,5,2.0305804348322924,61.856211495844434
-madrid,Moratalaz,M4: CC -> PUDO -> Entrega a pie,Amazon Logistics DMA3,72,4.614955533709756,103.33647408511713,7,2.0305804348322924,291.1042946941991
-madrid,Moratalaz,M5: CC -> PUDO -> Recogida Cliente,Amazon Logistics DMA3,72,4.614955533709756,103.33647408511713,73,4.383244510274733,40.15345998033878
+madrid,Moratalaz,M1: Furgoneta Combustión desde CC,Amazon Logistics DMA3,72,5.474407227473394,37.795264783098226,2,8.31495825228161,47.93126761129275
+madrid,Moratalaz,M2: Furgoneta Eléctrica desde CC,Amazon Logistics DMA3,72,5.474407227473394,37.795264783098226,2,0.0,41.574791261408045
+madrid,Moratalaz,M3: CC -> Microhub -> Bicicleta,Amazon Logistics DMA3,72,5.474407227473394,29.231095709132134,5,2.4087391800882934,69.12336182162068
+madrid,Moratalaz,M4: CC -> PUDO -> Entrega a pie,Amazon Logistics DMA3,72,5.474407227473394,145.4979878672632,7,2.4087391800882934,399.72476227090317
+madrid,Moratalaz,M5: CC -> PUDO -> Recogida Cliente,Amazon Logistics DMA3,72,5.474407227473394,145.4979878672632,73,5.772468515396204,40.92696650472605
