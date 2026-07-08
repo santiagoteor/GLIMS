@@ -2,13 +2,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+np.random.seed(42)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-"""
 CIUDAD_ACTIVA = "madrid"      # "madrid", "barcelona" o "valencia"
-BARRIO_ACTIVO = None          # None = todos los barrios / "Moratalaz" = solo uno
-"""
+BARRIO_ACTIVO = "moratalaz"          # None = todos los barrios / "Moratalaz" = solo uno
+
 CARPETA_DATA = BASE_DIR / "data"
 CARPETA_RESULTADOS = BASE_DIR / "results"
 
@@ -330,7 +330,7 @@ def simular_ciudad(ciudad: str, barrio_activo: str | None = None):
     return pd.DataFrame(resultados_totales)
 
 
-"""# =============================================================================
+# =============================================================================
 # 7. EJECUCIÓN
 # =============================================================================
 
@@ -365,4 +365,4 @@ if __name__ == "__main__":
             encoding="utf-8-sig",
         )
 
-        print(f"\nResultados guardados en: {ruta_salida.resolve()}")"""
+        print(f"\nResultados guardados en: {ruta_salida.resolve()}")
