@@ -1,0 +1,9 @@
+﻿Code,Name,Description
+0,Unknown,Tipo vacío o no reconocido
+1,Locker,Locker automático o infraestructura equivalente
+2,PUDO,Punto Pick-Up and Drop-Off
+3,Click & Collect,Punto de recogida Click & Collect
+4,Distribution / Reception Center,Centro de distribución o recepción
+5,Last Mile Logistics Station,Estación logística de última milla
+6,Warehouse / E-Fulfilment,Almacén o instalación de e-fulfilment
+7,Convenience Store,Establecimiento de conveniencia

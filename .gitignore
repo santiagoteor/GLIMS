@@ -1,0 +1,20 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+
+# Editor settings
+.vscode/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# CityPaq source and temporary exports
+raw_data/*CityPaq*.txt
+raw_data/*CityPaq*.csv
+raw_data/*Citypaq*.txt
+raw_data/*Citypaq*.csv
+
+# Intermediate locker-distance reports
+results/*/nearby_lockers_report.csv
+results/*/nearby_lockers_scored_report.csv
