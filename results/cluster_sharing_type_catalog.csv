@@ -1,0 +1,5 @@
+﻿Code,Name,Description
+1,Single record,La ubicación contiene un único registro
+2,"Same company, multiple records",La ubicación contiene varios registros de una única empresa
+3,"Multiple companies, single service",La ubicación contiene varias empresas y un único tipo de servicio
+4,"Multiple companies, multiple services",La ubicación contiene varias empresas y múltiples tipos de servicio

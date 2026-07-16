@@ -1,0 +1,4 @@
+﻿Code,Name,Description
+1,High,Diámetro máximo del cluster menor o igual a 15 m
+2,Medium,Diámetro máximo del cluster mayor de 15 m y menor o igual a 30 m
+3,Review,Diámetro máximo del cluster mayor de 30 m

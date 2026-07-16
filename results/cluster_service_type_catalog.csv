@@ -1,0 +1,8 @@
+﻿Code,Name,Description
+1,Locker only,La ubicación contiene únicamente registros Locker
+2,PUDO only,La ubicación contiene únicamente registros PUDO
+3,Locker and PUDO,La ubicación contiene al menos un Locker y un PUDO
+4,Click & Collect only,La ubicación contiene únicamente Click & Collect
+5,Convenience Store only,La ubicación contiene únicamente Convenience Stores
+6,Other single service,La ubicación contiene un único tipo distinto de Locker o PUDO
+7,Multiple services,La ubicación contiene múltiples tipos de servicio
