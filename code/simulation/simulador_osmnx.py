@@ -44,17 +44,19 @@ import numpy as np
 import pandas as pd
 import osmnx as ox
 import networkx as nx
-from simulador import calcular_haversine
-
+from code.simulation.simulador import calcular_haversine
+from code.common.paths import PROJECT_ROOT
 ox.settings.log_console = True
 ox.settings.use_cache = True
+
 
 #np.random.seed(42)
 
 # PROBLEM: Commented seeds and unfixed versions, configuration not saved with results.
 # TODO: reproducible results bit by bit.
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+
+BASE_DIR = PROJECT_ROOT
 
 CIUDAD_ACTIVA = "madrid"      # "madrid", "barcelona" o "valencia"
 BARRIO_ACTIVO = "Moratalaz"          # None = todos los barrios / "Moratalaz" = solo uno

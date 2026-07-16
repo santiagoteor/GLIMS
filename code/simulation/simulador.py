@@ -1,10 +1,12 @@
 from pathlib import Path
 import numpy as np
 import pandas as pd
-
+from code.common.paths import PROJECT_ROOT
 np.random.seed(42)
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+BASE_DIR = PROJECT_ROOT
 
 CIUDAD_ACTIVA = "madrid"      # "madrid", "barcelona" o "valencia"
 BARRIO_ACTIVO = "moratalaz"          # None = todos los barrios / "Moratalaz" = solo uno
@@ -307,12 +309,12 @@ def simular_ciudad(ciudad: str, barrio_activo: str | None = None):
     for _, barrio in limites.iterrows():
         nombre_barrio = barrio["barrio"]
 
-        print(f"\n📍 Simulando {ciudad.upper()} - {nombre_barrio}")
+        print(f"\nSimulando {ciudad.upper()} - {nombre_barrio}")
 
         puntos_barrio = filtrar_puntos_barrio(puntos, barrio)
 
         if len(puntos_barrio) == 0:
-            print(f"⚠️ No hay puntos dentro de los límites de {nombre_barrio}.")
+            print(f"No hay puntos dentro de los límites de {nombre_barrio}.")
             continue
 
         resultados_barrio = simular_barrio(
@@ -325,7 +327,7 @@ def simular_ciudad(ciudad: str, barrio_activo: str | None = None):
 
         resultados_totales.extend(resultados_barrio)
 
-        print(f"✅ {nombre_barrio}: {len(puntos_barrio)} paquetes simulados")
+        print(f"{nombre_barrio}: {len(puntos_barrio)} paquetes simulados")
 
     return pd.DataFrame(resultados_totales)
 

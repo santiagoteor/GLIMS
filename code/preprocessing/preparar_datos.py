@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from pathlib import Path
 import pandas as pd
+from code.common.paths import DATA_DIR, RAW_DATA_DIR
+from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-RAW_DATA = PROJECT_ROOT / "raw_data"
+RAW_DATA = RAW_DATA_DIR
 
 ARCHIVO_PUNTOS = RAW_DATA / "Points B2C_20250402.xlsx"
 ARCHIVO_CC = RAW_DATA / "CC.xlsx"
@@ -18,7 +17,7 @@ ARCHIVO_CITYPAQ_CANDIDATOS = (
     / "citypaq_candidates_for_import.csv"
 )
 
-CARPETA_SALIDA = PROJECT_ROOT / "data"
+CARPETA_SALIDA = DATA_DIR
 
 CIUDADES = {
     "City of Barcelona": "barcelona",

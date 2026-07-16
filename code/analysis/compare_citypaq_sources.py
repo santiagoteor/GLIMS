@@ -1,14 +1,13 @@
 from pathlib import Path
 import re
 import unicodedata
-
+from code.common.paths import PROJECT_ROOT, RESULTS_DIR
+from code.common.text_utils import normalize_text, text_similarity
 import numpy as np
 import pandas as pd
 from sklearn.neighbors import BallTree
 from difflib import SequenceMatcher
 
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 MASTER_FILE = PROJECT_ROOT / "raw_data" / "Points B2C_20250402.xlsx"
 
@@ -18,25 +17,10 @@ CITYPAQ_FILES = {
     "Valencia": PROJECT_ROOT / "raw_data" / "Valencia Citypaq.csv",
 }
 
-OUTPUT_DIR = PROJECT_ROOT / "results" / "citypaq_source_comparison"
+OUTPUT_DIR = RESULTS_DIR / "citypaq_source_comparison"
 
 DISTANCE_THRESHOLD_METERS = 50
 EARTH_RADIUS_METERS = 6_371_000
-
-
-def normalize_text(value) -> str:
-    if pd.isna(value):
-        return ""
-
-    text = str(value).strip().upper()
-    text = unicodedata.normalize("NFKD", text)
-    text = "".join(
-        char for char in text
-        if not unicodedata.combining(char)
-    )
-    text = re.sub(r"[^A-Z0-9]+", " ", text)
-
-    return re.sub(r"\s+", " ", text).strip()
 
 
 def normalize_company(value) -> str:
@@ -51,18 +35,6 @@ def normalize_company(value) -> str:
 
     return company_map.get(text, text)
 
-def text_similarity(a, b) -> float:
-    a = normalize_text(a)
-    b = normalize_text(b)
-
-    if not a or not b:
-        return 0.0
-
-    return round(
-        SequenceMatcher(None, a, b).ratio() * 100,
-        2,
-    )
-    
 def extract_branch_id(value) -> str:
     text = normalize_text(value)
 

@@ -1,19 +1,24 @@
 from pathlib import Path
 import re
 import unicodedata
-
+from code.common.paths import DATA_DIR, RESULTS_DIR
+from code.common.text_utils import normalize_text, text_similarity
+from code.common.address_utils import (
+    extract_address_numbers,
+    compare_address_numbers,
+)
 import pandas as pd
 import numpy as np
 from sklearn.neighbors import BallTree
 from difflib import SequenceMatcher
 import re
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 
 CITIES = ["barcelona", "madrid", "valencia"]
 
-DATA_DIR = PROJECT_ROOT / "data"
-RESULTS_DIR = PROJECT_ROOT / "results"
+DATA_DIR = DATA_DIR
+RESULTS_DIR = RESULTS_DIR
 
 
 RECORD_TYPE_CATALOG = {
@@ -171,73 +176,6 @@ class UnionFind:
         else:
             self.parent[root_second] = root_first
             self.rank[root_first] += 1
-
-
-def normalize_text(value) -> str:
-    if pd.isna(value):
-        return ""
-
-    text = str(value).strip()
-    text = unicodedata.normalize("NFKD", text)
-    text = "".join(
-        char for char in text
-        if not unicodedata.combining(char)
-    )
-    text = text.upper()
-    text = re.sub(r"[^A-Z0-9]+", " ", text)
-
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def text_similarity(first, second) -> float:
-    first_normalized = normalize_text(first)
-    second_normalized = normalize_text(second)
-
-    if not first_normalized or not second_normalized:
-        return 0.0
-
-    return round(
-        SequenceMatcher(
-            None,
-            first_normalized,
-            second_normalized,
-        ).ratio() * 100,
-        2,
-    )
-    
-def extract_address_numbers(value) -> set[str]:
-    normalized = normalize_text(value)
-
-    if not normalized:
-        return set()
-
-    return set(
-        re.findall(
-            r"\b\d+\b",
-            normalized,
-        )
-    )
-
-
-def compare_address_numbers(
-    first,
-    second,
-) -> tuple[bool, bool]:
-    first_numbers = extract_address_numbers(first)
-    second_numbers = extract_address_numbers(second)
-
-    numbers_available = bool(
-        first_numbers and second_numbers
-    )
-
-    if not numbers_available:
-        return False, False
-
-    same_address_number = bool(
-        first_numbers.intersection(second_numbers)
-    )
-
-    return True, same_address_number    
 
 def classify_record_type(value) -> int:
     normalized = normalize_text(value)

@@ -1,7 +1,7 @@
 from pathlib import Path
 import re
 import unicodedata
-
+from code.common.paths import DATA_DIR, RESULTS_DIR
 import numpy as np
 import pandas as pd
 from sklearn.neighbors import BallTree
@@ -9,9 +9,8 @@ from tqdm import tqdm
 from difflib import SequenceMatcher
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-BASE_DATA = PROJECT_ROOT / "data"
-BASE_RESULTS = PROJECT_ROOT / "results"
+BASE_DATA = DATA_DIR
+BASE_RESULTS = RESULTS_DIR
 
 CITIES = ["barcelona", "madrid", "valencia"]
 
