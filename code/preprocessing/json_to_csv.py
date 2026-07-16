@@ -1,10 +1,8 @@
 import json
-from pathlib import Path
 import pandas as pd
+from code.common.paths import RAW_DATA_DIR
 
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-INPUT_FOLDER = PROJECT_ROOT / "raw_data"
+INPUT_FOLDER = RAW_DATA_DIR
 
 FILES = [
     "Barcelona Citypaq.txt",

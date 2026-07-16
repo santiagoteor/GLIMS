@@ -13,13 +13,7 @@ from sklearn.neighbors import BallTree
 from difflib import SequenceMatcher
 import re
 
-
-
 CITIES = ["barcelona", "madrid", "valencia"]
-
-DATA_DIR = DATA_DIR
-RESULTS_DIR = RESULTS_DIR
-
 
 RECORD_TYPE_CATALOG = {
     0: {

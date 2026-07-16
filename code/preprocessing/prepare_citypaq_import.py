@@ -1,20 +1,15 @@
-from pathlib import Path
-
+from code.common.paths import RESULTS_DIR
 import pandas as pd
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
 INPUT_FILE = (
-    PROJECT_ROOT
-    / "results"
+    RESULTS_DIR
     / "citypaq_source_comparison"
     / "citypaq_possibly_new_all_cities.csv"
 )
 
 OUTPUT_FILE = (
-    PROJECT_ROOT
-    / "results"
+    RESULTS_DIR
     / "citypaq_source_comparison"
     / "citypaq_candidates_for_import.csv"
 )
