@@ -5,6 +5,9 @@ import unicodedata
 from pathlib import Path
 import pandas as pd
 
+# PROBLEM: The current code uses hardcoded absolute paths for the raw data and output directories, which makes it non-portable and difficult to reproduce on different machines or environments. 
+# TODO: Update the code to use relative paths or configurable paths (e.g., through environment variables or a configuration file) for the raw data and output directories. 
+
 # Carpeta de los Excel originales
 RAW_DATA = Path("E:/UPV/Proyectos/GLIMS/raw_data")
 
@@ -23,6 +26,9 @@ CIUDADES = {
     "City of Valencia": "valencia",
 }
 
+# PROBLEM: The current bounding boxes for neighborhoods are hardcoded and may not accurately represent the actual administrative boundaries of the neighborhoods.
+# TODO: Update the bounding boxes to use actual polygonal boundaries of the neighborhoods, possibly by using a geospatial library (e.g., GeoPandas) and shapefiles or GeoJSON files that contain the real boundaries of the neighborhoods. 
+
 LIMITES_BARRIOS = {
     "barcelona": [
         {"barrio": "Eixample", "lat_min": 41.380, "lat_max": 41.405, "lon_min": 2.145, "lon_max": 2.175},
@@ -40,6 +46,24 @@ LIMITES_BARRIOS = {
         {"barrio": "La Punta", "lat_min": 39.430, "lat_max": 39.455, "lon_min": -0.350, "lon_max": -0.320},
     ],
 }
+
+# PROBLEM: The current parameters for vehicle capacity and hub capacity are inconsistent with the project specifications. 
+# The code uses a vehicle capacity of 60 packages per van, while the project documentation specifies a fixed daily capacity of 300 packages and a microhub area of 50 m², which corresponds to approximately 1,500 packages. 
+# This discrepancy can lead to unrealistic simulations and results.
+# TODO: Update the vehicle capacity and hub capacity parameters to be consistent with the project specifications.
+
+# PROBLEM: The current CO2 emissions factors for diesel, electric, and bicycle vehicles are not well-documented and may not accurately reflect the actual emissions associated with each vehicle type. 
+# The code uses a value of 220 g CO2/km for diesel vehicles, 0 g CO2/km for electric vehicles and bicycles, and 25 g CO2/km for customer trips, without providing references or clarifying whether these values represent tank-to-wheel (TTW) 
+# or well-to-wheel (WTW) emissions.
+# TODO: Update the CO2 emissions factors to be based on credible sources and provide clear documentation on whether the values represent TTW or WTW emissions. 
+# Consider using lifecycle assessment (LCA) data or official emissions factors from recognized organizations (e.g., European Environment Agency, U.S. Environmental Protection Agency) to ensure accuracy and transparency.
+
+# PROBLEM: The current cost parameters for vehicle operation and PUDO commission are based on assumptions without supporting evidence.
+# TODO: Update the cost parameters to be based on credible sources or provide a range of values for sensitivity analysis. 
+# Consider using industry reports, academic studies, or official statistics to inform the cost estimates and ensure that they are realistic and justifiable.
+
+# PROBLEM: The current implementation uses hardcoded parameters for vehicle models, costs, speeds, CO2 emissions, and capacities in the code.
+# TODO: Refactor the code to read these parameters from an external configuration file (e.g., JSON, YAML, or CSV) to allow for easier updates and maintenance.
 
 PARAMETROS_MODELOS = [
     {"modelo": "FURGONETA_CONV",
