@@ -1,3 +1,44 @@
+
+# PROBLEM: The logic is not encapsulated in a reusable and testable manner.
+# TODO: Refactor the code to create a modular simulator with single-responsibility functions that can be easily tested and reused.
+
+# PROBLEM: The conclusions drawn from the simulation results depend on parameters that are not well-documented or validated.
+# TODO: Conduct a sensitivity analysis on key parameters such as fuel cost, CO2 emission factors, vehicle capacity, PUDO commission, and hub costs to assess the robustness of the conclusions.
+
+# PROBLEM: It is not contrasted the reliability of OSM distances with an independent source.
+# TODO: Empirically validate the OSM distances by comparing them with real-world measurements or alternative mapping services (e.g., Google Maps, HERE Maps) to ensure accuracy and reliability of the simulation results.
+
+# PROBLEM: The memory requests 10 indicators broken down (km by mode, trips by mode, emissions, cost); the code only aggregates some of them.
+# TODO: Report the 10 indicators for each neighborhood and city, including total kilometers traveled by mode, number of trips by mode, CO2 emissions, and total cost. 
+# Ensure that the simulation outputs are comprehensive and meet the requirements of the memory.
+
+# PROBLEM: It doesn't cross results with the density of demand/population in the neighborhood.
+# TODO: Analyze how cost and emissions vary according to density (e.g., Eixample dense vs. El Pardo dispersed) by incorporating population and demand density data into the simulation and comparing the results across different neighborhoods.
+
+# PROBLEM: only 5 base references; no structured review.
+# TODO: A systematic review (PRISMA, WoS/Scopus) on microhubs, PUDO, cargo-bike and LRP in the last mile.
+
+# PROBLEM: missing LRP formalization, objective function and algorithms; today the code does not implement the described methodology.
+# TODO: Methodology section with mathematical model, objective function with penalties and description of CWS+ILS.
+
+# PROBLEM: It does not a description of the dataset (size by neighborhood, cleaning, representativeness).
+# TODO: Include a data section with descriptive statistics and the data cleaning process to provide transparency and context for the simulation results.
+
+# PROBLEM: There is a comparative run, but without a design (repetitions, sensitivity, validation, significance).
+# TODO: Develop a replicable experimental protocol with multiple runs, sensitivity analysis, and statistical validation to ensure the robustness and significance of the simulation results.
+
+# PROBLEM: exploratory graphs are scattered, without final figures/tables or significance.
+# TODO: Create comprehensive figures and tables that summarize the results by indicator and neighborhood, including statistical significance tests to support the conclusions drawn from the simulation.
+
+# PROBLEM: There is no interpretation of which model performs best, where, and why, nor of the cost-emissions trade-off.
+# TODO: Include a discussion section that interprets the results, identifies the best-performing models in different contexts, and analyzes the trade-offs between cost and emissions to provide actionable insights for urban logistics planning.
+
+# PROBLEM: There is no recognition of the simplifications (radial, fixed capacity, no time windows, no traffic).
+# TODO: Include a section on limitations that honestly acknowledges these simplifications.
+
+# PROBLEM: Conclusions written in the memory but not in a paper section
+# TODO: Conclusions and implications for PMUS/E-DUM and recomendations 
+
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -9,6 +50,9 @@ ox.settings.log_console = True
 ox.settings.use_cache = True
 
 #np.random.seed(42)
+
+# PROBLEM: Commented seeds and unfixed versions, configuration not saved with results.
+# TODO: reproducible results bit by bit.
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -48,6 +92,21 @@ def cargar_redes(ciudad: str):
 
     return G_drive
 
+def construir_subgrafo_barrio(
+    G_drive,
+    barrio,
+    buffer=0.01
+):
+
+    north = barrio["lat_max"] + buffer
+    south = barrio["lat_min"] - buffer
+    east = barrio["lon_max"] + buffer
+    west = barrio["lon_min"] - buffer
+
+    return ox.truncate.truncate_graph_bbox(
+        G_drive,
+        bbox=(west, south, east, north)
+    )
 
 def asignar_nodos(
     puntos,
@@ -85,6 +144,8 @@ def filtrar_puntos_barrio(puntos: pd.DataFrame, barrio: pd.Series):
         & (puntos["Longitude"].between(barrio["lon_min"], barrio["lon_max"]))
     ].copy()
 
+# PROBLEM: the microhub/PUDO is assumed to be at the centroid of the neighborhood; there is no location decision, which is the core of the promised LRP (PR1/PR2).
+# TODO: Implement an optimization model to determine the optimal location of the microhub/PUDO within the neighborhood, considering candidate locations such as parking lots, markets, post offices, metro stations, and lockers. 
 
 def preparar_barrio(
     puntos_barrio,
@@ -139,30 +200,39 @@ def seleccionar_centro_logistico(
 
     return cc
 
+# PROBLEM: The current implementation constructs a dense distance matrix by running Dijkstra's algorithm for each node in the subgraph. 
+# This approach does not scale well, especially when dealing with multiple neighborhoods across different cities. Additionally, much of the computed data is only used for the Traveling Salesman Problem (TSP), 
+# while the radial distance calculation only requires the row corresponding to the centroid.
+
+# TODO: Refactor the distance calculation to be more efficient and scalable. Consider using a more targeted approach that computes only the necessary distances for the TSP and radial calculations,
+# possibly by leveraging more efficient graph traversal algorithms or data structures. This will improve performance and scalability. 
+
 
 def construir_matriz_distancias(
     G,
     lista_nodos
 ):
-    """
-    Construye una matriz de distancias (km) entre todos los nodos
-    utilizando la red viaria.
-    """
 
-    print(f"Calculando rutas mínimas con Dijkstra...")
+    print("Calculando rutas mínimas con Dijkstra...")
 
-    # Eliminar duplicados conservando el orden
     lista_nodos = list(dict.fromkeys(lista_nodos))
 
-    matriz = pd.DataFrame(
-        index=lista_nodos,
-        columns=lista_nodos,
-        dtype=float
+    n = len(lista_nodos)
+
+    matriz = np.full(
+        (n, n),
+        np.inf
     )
+
+    mapa_nodos = {
+        nodo: i 
+        for i, nodo in enumerate(lista_nodos)
+    }
 
     for origen in lista_nodos:
 
-        # Distancias desde un nodo a todos los demás
+        i = mapa_nodos[origen]
+
         distancias = nx.single_source_dijkstra_path_length(
             G,
             origen,
@@ -171,17 +241,18 @@ def construir_matriz_distancias(
 
         for destino in lista_nodos:
 
-            matriz.loc[origen, destino] = (
+            j = mapa_nodos[destino]
+
+            matriz[i, j] = (
                 distancias.get(destino, np.inf)
                 / 1000
             )
 
-    return matriz
+    return matriz, mapa_nodos
 
 
 def obtener_matrices_barrio(
     info_barrio,
-    cc,
     G_drive
 ):
     """
@@ -191,45 +262,54 @@ def obtener_matrices_barrio(
 
     nodos_drive = (
         [info_barrio["centro_drive"]]
-        + info_barrio["clientes_drive"]
-        + [cc["node_drive"]]
-    )
+        + info_barrio["clientes_drive"])
 
     print(
         f"\nConstruyendo matriz de distancias "
         f"sobre la red OSM ({len(nodos_drive)} nodos)..."
     )
 
-    matriz_drive = construir_matriz_distancias(
+    matriz_drive, mapa_nodos = construir_matriz_distancias(
         G_drive,
         nodos_drive
     )
 
     print("Matriz de distancias creada mediante Dijkstra.")
 
-    return matriz_drive
+    return matriz_drive, mapa_nodos
+
+# PROBLEM: blocks of commented-out code and debug print statements are embedded in the main flow, which clutters and confuses the code.
+# TODO: Remove commented-out code and replace print statements with configurable logging.
 
 
-def distancia_cc_barrio(
-    info_barrio,
-    cc,
-    matriz_drive
-):
-    """
-    Calcula la distancia real entre el centro logístico seleccionado
-    y el centroide del barrio.
-    """
+# def distancia_cc_barrio(
+#     info_barrio,
+#     cc,
+#     matriz_drive
+# ):
+#     """
+#     Calcula la distancia real entre el centro logístico seleccionado
+#     y el centroide del barrio.
+#     """
 
-    return matriz_drive.loc[
-        cc["node_drive"],
-        info_barrio["centro_drive"]
-    ]
+#     return matriz_drive.loc[
+#         cc["node_drive"],
+#         info_barrio["centro_drive"]
+#     ]
 
+# PROBLEM: The current implementation uses a nearest-neighbor heuristic for the Traveling Salesman Problem (TSP) without any declaration or quantification of the optimality gap.
+# TODO: Investigate and implement a more robust TSP heuristic or solver that provides a quantifiable optimality gap. 
+# Consider using established libraries or algorithms that can offer better performance and accuracy for TSP solutions in urban logistics scenarios.
+
+# PROBLEM: The code currently uses a nearest-neighbor heuristic for the Traveling Salesman Problem (TSP) without any declaration or quantification of the optimality gap.
+# TODO: Optimization nucleus: Implement a multi-start Clarke-Wright Savings (CWS) algorithm followed by an Iterated Local Search (ILS) metaheuristic to solve the TSP with an objective 
+# function that penalizes CO2 emissions and traversing through vulnerable zones. 
 
 def tsp_vecino_mas_cercano(
     nodo_inicio,
     clientes,
-    matriz
+    matriz,
+    mapa_nodos
 ):
 
     pendientes = clientes.copy()
@@ -243,24 +323,25 @@ def tsp_vecino_mas_cercano(
         siguiente = min(
             pendientes,
             key=lambda nodo:
-                matriz.loc[
-                    nodo_actual,
-                    nodo
+                matriz[
+                    mapa_nodos[nodo_actual],
+                    mapa_nodos[nodo]
                 ]
         )
 
-        km += matriz.loc[
-            nodo_actual,
-            siguiente
+        km += matriz[
+            mapa_nodos[nodo_actual],
+            mapa_nodos[siguiente]
         ]
 
         pendientes.remove(siguiente)
 
         nodo_actual = siguiente
 
-    km += matriz.loc[
-        nodo_actual,
-        nodo_inicio
+
+    km += matriz[
+        mapa_nodos[nodo_actual],
+        mapa_nodos[nodo_inicio]
     ]
 
     return km
@@ -269,7 +350,8 @@ def tsp_vecino_mas_cercano(
 def calcular_distancia_radial(
     nodo_origen,
     clientes,
-    matriz
+    matriz,
+    mapa_nodos
 ):
 
     distancia = 0
@@ -277,7 +359,10 @@ def calcular_distancia_radial(
     for cliente in clientes:
 
         distancia += (
-            matriz.loc[nodo_origen, cliente] * 2
+            matriz[
+                mapa_nodos[nodo_origen],
+                mapa_nodos[cliente]
+            ] * 2
         )
 
     return distancia
@@ -289,22 +374,14 @@ def simular_barrio(
     puntos_barrio: pd.DataFrame,
     centros: pd.DataFrame,
     parametros: dict,
-    G_drive
+    G_drive,
+    barrio: pd.Series,
 ):
 
     num_paquetes = len(puntos_barrio)
 
     if num_paquetes == 0:
         return []
-
-    # --------------------------------------------------
-    # Preparación del barrio
-    # --------------------------------------------------
-
-    info_barrio = preparar_barrio(
-        puntos_barrio,
-        G_drive
-    )
 
     # --------------------------------------------------
     # Preparación del barrio
@@ -341,29 +418,51 @@ def simular_barrio(
         G_drive
     )
 
+    # PROBLEM: truncate_graph_bbox and nearest_nodes changed their signatures between OSMnx 1.x and 2.x; without a pinned version, the code may break.
+    # TODO: Ensure a reproducible environment with pinned dependencies to avoid compatibility issues with OSMnx updates.
+
+    G_barrio = construir_subgrafo_barrio(
+        G_drive,
+        barrio    
+    )
+
     print(
         f"Centro logístico seleccionado: "
         f"{cc_seleccionado['Location']}"
     )
-
     # --------------------------------------------------
     # Construcción de la matriz de distancias
     # --------------------------------------------------
 
-    matriz_drive = obtener_matrices_barrio(
+    matriz_drive, mapa_nodos = obtener_matrices_barrio(
         info_barrio,
-        cc_seleccionado,
-        G_drive
+        G_barrio
     )
 
     # --------------------------------------------------
     # Distancia troncal
     # --------------------------------------------------
 
-    distancia_troncal = distancia_cc_barrio(
-        info_barrio,
-        cc_seleccionado,
-        matriz_drive
+    # distancia_troncal = distancia_cc_barrio(
+    #     info_barrio,
+    #     cc_seleccionado,
+    #     matriz_drive
+    # )
+
+    distancia_troncal = (
+        nx.astar_path_length(
+            G_drive,
+            cc_seleccionado["node_drive"],
+            info_barrio["centro_drive"],
+            heuristic=lambda u, v: calcular_haversine(
+                G_drive.nodes[u]["y"],
+                G_drive.nodes[u]["x"],
+                G_drive.nodes[v]["y"],
+                G_drive.nodes[v]["x"],
+            ) * 1000,   # metros
+            weight="length",
+        )
+        / 1000
     )
 
     print(
@@ -375,20 +474,34 @@ def simular_barrio(
     # Kilómetros internos (TSP)
     # --------------------------------------------------
 
+    # PROBLEM: It does not consider the vehicle capacity, it just calculates the TSP for all clients in the neighborhood. This is not realistic for delivery scenarios where vehicles have limited capacity.
+    
+    # TODO:
+
+    ### Divide list in groups of size vehicle_capacity
+    ### For each group, calculate the optimal internal route (TSP)
+    ### Sum the kilometers of all internal routes (one per group) plus the round trips to the CC.
+
     km_internos = tsp_vecino_mas_cercano(
         info_barrio["centro_drive"],
         info_barrio["clientes_drive"],
-        matriz_drive
+        matriz_drive,
+        mapa_nodos
     )
 
     # --------------------------------------------------
     # Distancia radial (PUDO y reparto a pie)
     # --------------------------------------------------
 
+    # PROBLEM: The radial distance for the delivery person on foot (km_repartidor_pie) is calculated using the drive network, which may not accurately reflect the actual walking distances. 
+    # This could lead to underestimating or overestimating the distances and times for pedestrian deliveries.
+    # TODO: Consider using a pedestrian network (if available) to calculate the radial distance for the delivery person on foot. This would provide a more accurate estimate of the distances and times for pedestrian deliveries.
+
     km_repartidor_pie = calcular_distancia_radial(
         info_barrio["centro_drive"],
         info_barrio["clientes_drive"],
-        matriz_drive
+        matriz_drive,
+        mapa_nodos
     )
 
     resultados = []
@@ -469,6 +582,12 @@ def simular_barrio(
 
     km_abastecimiento_hub = distancia_troncal * 2
 
+    # PROBLEM: The code currently uses the parameters of "FURGONETA_CONV" (conventional van) for the trunk leg from the CC to the hub in models M3, M4, and M5. 
+    # However, according to the project specifications, this trunk leg should use the parameters of "FURGONETA_ELEC" (electric van) for sustainable scenarios. This discrepancy leads to inflated emissions and costs in the green scenarios.
+
+    # TODO: Update the code to use the correct vehicle parameters for the trunk leg in models M3, M4, and M5. 
+    # Specifically, replace the references to "FURGONETA_CONV" with "FURGONETA_ELEC" when calculating the cost and CO₂ emissions for the CC→hub leg.
+
     costo_camion_hub = (
         km_abastecimiento_hub
         * parametros["FURGONETA_CONV"]["costo_km"]
@@ -480,6 +599,9 @@ def simular_barrio(
     ) / 1000
 
     km_bike_internos = km_internos * 1.15
+
+    # PROBLEM: The current implementation uses a fixed factor of 1.15 to account for the deviation in bicycle routes compared to the optimal TSP route.
+    # TODO: Validate the 1.15 deviation factor for bicycle routes against real-world data or consider using actual routing algorithms to calculate more accurate bicycle distances. 
 
     costo_bike = (
         km_bike_internos * m3["costo_km"]
@@ -530,10 +652,13 @@ def simular_barrio(
 
     cliente = info_barrio["clientes_drive"][0]
 
-    print("OSM:", matriz_drive.loc[
-        info_barrio["centro_drive"],
-        cliente
-    ])
+    print(
+        "OSM:",
+        matriz_drive[
+            mapa_nodos[info_barrio["centro_drive"]],
+            mapa_nodos[cliente]
+        ]
+    )
 
     fila = puntos_barrio.iloc[0]
 
@@ -573,6 +698,8 @@ def simular_barrio(
 
     return resultados
 
+# PROBLEM: One single run per neighborhood; there is no stochasticity or Monte Carlo simulation, even though PR3/PR4 mention variability in demand and density.
+# TODO: Implement multiple runs with variable demand and density, and calculate confidence intervals for the results to account for stochasticity in the simulation.
 
 def simular_ciudad(
     ciudad: str,
@@ -591,6 +718,11 @@ def simular_ciudad(
     # ---------------------------------------------
 
     G_drive = cargar_redes(ciudad)
+
+    ## PROBELM: The current implementation uses OSMnx to download and prepare the road network for the city. 
+    # However, it does not provide any references or citations to support the choice of using OSMnx or the specific methods employed for shortest-path calculations. 
+
+    # TODO: Include references to relevant literature, such as Boeing (2017) or other studies that validate the use of OSMnx and shortest-path algorithms for urban logistics simulations. 
 
     # ---------------------------------------------
     # Asignación de nodos OSM
@@ -653,6 +785,7 @@ def simular_ciudad(
             nombre_barrio=nombre_barrio,
             puntos_barrio=puntos_barrio,
             centros=centros,
+            barrio=barrio,
             parametros=parametros,
             G_drive=G_drive
         )
