@@ -1,14 +1,12 @@
 from pathlib import Path
 import re
-import unicodedata
-
+from code.common.paths import PROJECT_ROOT, RESULTS_DIR
+from code.common.text_utils import normalize_text, text_similarity
 import numpy as np
 import pandas as pd
 from sklearn.neighbors import BallTree
-from difflib import SequenceMatcher
+from code.common.constants import EARTH_RADIUS_METERS
 
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 MASTER_FILE = PROJECT_ROOT / "raw_data" / "Points B2C_20250402.xlsx"
 
@@ -18,25 +16,9 @@ CITYPAQ_FILES = {
     "Valencia": PROJECT_ROOT / "raw_data" / "Valencia Citypaq.csv",
 }
 
-OUTPUT_DIR = PROJECT_ROOT / "results" / "citypaq_source_comparison"
+OUTPUT_DIR = RESULTS_DIR / "citypaq_source_comparison"
 
 DISTANCE_THRESHOLD_METERS = 50
-EARTH_RADIUS_METERS = 6_371_000
-
-
-def normalize_text(value) -> str:
-    if pd.isna(value):
-        return ""
-
-    text = str(value).strip().upper()
-    text = unicodedata.normalize("NFKD", text)
-    text = "".join(
-        char for char in text
-        if not unicodedata.combining(char)
-    )
-    text = re.sub(r"[^A-Z0-9]+", " ", text)
-
-    return re.sub(r"\s+", " ", text).strip()
 
 
 def normalize_company(value) -> str:
@@ -51,18 +33,6 @@ def normalize_company(value) -> str:
 
     return company_map.get(text, text)
 
-def text_similarity(a, b) -> float:
-    a = normalize_text(a)
-    b = normalize_text(b)
-
-    if not a or not b:
-        return 0.0
-
-    return round(
-        SequenceMatcher(None, a, b).ratio() * 100,
-        2,
-    )
-    
 def extract_branch_id(value) -> str:
     text = normalize_text(value)
 
@@ -108,7 +78,7 @@ def find_city_sheet(excel: pd.ExcelFile, city: str) -> str:
         if city_key in normalize_text(sheet):
             return sheet
 
-    raise ValueError(f"No se encontró una hoja para {city}")
+    raise ValueError(f"No sheet was found for {city}")
 
 
 def compare_city(
@@ -152,7 +122,7 @@ def compare_city(
 
     if master_same_company.empty:
         raise ValueError(
-            f"No hay registros de la misma empresa en el maestro para {city}"
+            f"No records from the same company were found in the master file for {city}"
         )
 
     master_coords = np.radians(
@@ -304,16 +274,16 @@ def main() -> None:
         )
 
         print(f"\n{city}")
-        print(f"Registros CityPaq: {len(report)}")
+        print(f"CityPaq records: {len(report)}")
         print(
-            f"A menos de 50 m: "
+            f"Within 50 m: "
             f"{int(report['Within_50m'].sum())}"
         )
         print(
-            f"Distancia mínima: "
+            f"Minimum distance: "
             f"{report['Distance_m'].min():.2f} m"
         )
-        print(f"Reporte: {output_file}")
+        print(f"Report: {output_file}")
 
 
 if __name__ == "__main__":

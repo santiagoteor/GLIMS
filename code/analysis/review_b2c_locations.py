@@ -1,53 +1,46 @@
-from pathlib import Path
-import re
-import unicodedata
-
+from code.common.paths import DATA_DIR, RESULTS_DIR
+from code.common.text_utils import normalize_text, text_similarity
+from code.common.address_utils import compare_address_numbers
 import pandas as pd
 import numpy as np
 from sklearn.neighbors import BallTree
-from difflib import SequenceMatcher
-import re
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-CITIES = ["barcelona", "madrid", "valencia"]
-
-DATA_DIR = PROJECT_ROOT / "data"
-RESULTS_DIR = PROJECT_ROOT / "results"
-
+from code.common.constants import (
+    CITIES,
+    EARTH_RADIUS_METERS,
+)
 
 RECORD_TYPE_CATALOG = {
     0: {
         "name": "Unknown",
-        "description": "Tipo vacío o no reconocido",
+        "description": "Empty or unrecognized type",
     },
     1: {
         "name": "Locker",
-        "description": "Locker automático o infraestructura equivalente",
+        "description": "Automatic locker or equivalent infrastructure",
     },
     2: {
         "name": "PUDO",
-        "description": "Punto Pick-Up and Drop-Off",
+        "description": "Pick-Up and Drop-Off point",
     },
     3: {
         "name": "Click & Collect",
-        "description": "Punto de recogida Click & Collect",
+        "description": "Click & Collect pickup point",
     },
     4: {
         "name": "Distribution / Reception Center",
-        "description": "Centro de distribución o recepción",
+        "description": "Distribution or reception center",
     },
     5: {
         "name": "Last Mile Logistics Station",
-        "description": "Estación logística de última milla",
+        "description": "Last-mile logistics station",
     },
     6: {
         "name": "Warehouse / E-Fulfilment",
-        "description": "Almacén o instalación de e-fulfilment",
+        "description": "Warehouse or e-fulfilment facility",
     },
     7: {
         "name": "Convenience Store",
-        "description": "Establecimiento de conveniencia",
+        "description": "Convenience store",
     },
 }
 
@@ -55,31 +48,31 @@ RECORD_TYPE_CATALOG = {
 CLUSTER_TYPE_CATALOG = {
     1: {
         "name": "Locker only",
-        "description": "La ubicación contiene únicamente registros Locker",
+        "description": "The location contains only Locker records",
     },
     2: {
         "name": "PUDO only",
-        "description": "La ubicación contiene únicamente registros PUDO",
+        "description": "The location contains only PUDO records",
     },
     3: {
         "name": "Locker and PUDO",
-        "description": "La ubicación contiene al menos un Locker y un PUDO",
+        "description": "The location contains at least one Locker and one PUDO",
     },
     4: {
         "name": "Click & Collect only",
-        "description": "La ubicación contiene únicamente Click & Collect",
+        "description": "The location contains only Click & Collect records",
     },
     5: {
         "name": "Convenience Store only",
-        "description": "La ubicación contiene únicamente Convenience Stores",
+        "description": "The location contains only Convenience Store records",
     },
     6: {
         "name": "Other single service",
-        "description": "La ubicación contiene un único tipo distinto de Locker o PUDO",
+        "description": "The location contains a single service type other than Locker or PUDO",
     },
     7: {
         "name": "Multiple services",
-        "description": "La ubicación contiene múltiples tipos de servicio",
+        "description": "The location contains multiple service types",
     },
 }
 
@@ -87,28 +80,28 @@ SHARING_TYPE_CATALOG = {
     1: {
         "name": "Single record",
         "description": (
-            "La ubicación contiene un único registro"
+            "The location contains a single record"
         ),
     },
     2: {
         "name": "Same company, multiple records",
         "description": (
-            "La ubicación contiene varios registros "
-            "de una única empresa"
+            "The location contains multiple records "
+            "from a single company"
         ),
     },
     3: {
         "name": "Multiple companies, single service",
         "description": (
-            "La ubicación contiene varias empresas "
-            "y un único tipo de servicio"
+            "The location contains multiple companies "
+            "and a single service type"
         ),
     },
     4: {
         "name": "Multiple companies, multiple services",
         "description": (
-            "La ubicación contiene varias empresas "
-            "y múltiples tipos de servicio"
+            "The location contains multiple companies "
+            "and multiple service types"
         ),
     },
 }
@@ -118,25 +111,23 @@ SPATIAL_CONFIDENCE_CATALOG = {
     1: {
         "name": "High",
         "description": (
-            "Diámetro máximo del cluster menor o igual a 15 m"
+            "Maximum cluster diameter less than or equal to 15 m"
         ),
     },
     2: {
         "name": "Medium",
         "description": (
-            "Diámetro máximo del cluster mayor de 15 m "
-            "y menor o igual a 30 m"
+            "Maximum cluster diameter greater than 15 m "
+            "and less than or equal to 30 m"
         ),
     },
     3: {
         "name": "Review",
         "description": (
-            "Diámetro máximo del cluster mayor de 30 m"
+            "Maximum cluster diameter greater than 30 m"
         ),
     },
 }
-
-EARTH_RADIUS_METERS = 6_371_000
 
 STRONG_DISTANCE_METERS = 5
 CONDITIONAL_DISTANCE_METERS = 15
@@ -172,73 +163,6 @@ class UnionFind:
             self.parent[root_second] = root_first
             self.rank[root_first] += 1
 
-
-def normalize_text(value) -> str:
-    if pd.isna(value):
-        return ""
-
-    text = str(value).strip()
-    text = unicodedata.normalize("NFKD", text)
-    text = "".join(
-        char for char in text
-        if not unicodedata.combining(char)
-    )
-    text = text.upper()
-    text = re.sub(r"[^A-Z0-9]+", " ", text)
-
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def text_similarity(first, second) -> float:
-    first_normalized = normalize_text(first)
-    second_normalized = normalize_text(second)
-
-    if not first_normalized or not second_normalized:
-        return 0.0
-
-    return round(
-        SequenceMatcher(
-            None,
-            first_normalized,
-            second_normalized,
-        ).ratio() * 100,
-        2,
-    )
-    
-def extract_address_numbers(value) -> set[str]:
-    normalized = normalize_text(value)
-
-    if not normalized:
-        return set()
-
-    return set(
-        re.findall(
-            r"\b\d+\b",
-            normalized,
-        )
-    )
-
-
-def compare_address_numbers(
-    first,
-    second,
-) -> tuple[bool, bool]:
-    first_numbers = extract_address_numbers(first)
-    second_numbers = extract_address_numbers(second)
-
-    numbers_available = bool(
-        first_numbers and second_numbers
-    )
-
-    if not numbers_available:
-        return False, False
-
-    same_address_number = bool(
-        first_numbers.intersection(second_numbers)
-    )
-
-    return True, same_address_number    
-
 def classify_record_type(value) -> int:
     normalized = normalize_text(value)
 
@@ -266,7 +190,7 @@ def load_city_records(city: str) -> pd.DataFrame:
 
     if not input_file.exists():
         raise FileNotFoundError(
-            f"No se encontró el archivo: {input_file}"
+            f"File not found: {input_file}"
         )
 
     df = pd.read_csv(input_file)
@@ -283,7 +207,7 @@ def load_city_records(city: str) -> pd.DataFrame:
 
     if missing_columns:
         raise ValueError(
-            f"{city}: faltan columnas requeridas: "
+            f"{city}: required columns are missing: "
             f"{sorted(missing_columns)}"
         )
 
@@ -924,13 +848,13 @@ def add_cluster_review_flags(
     pairs: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Marca los clusters que requieren revisión manual.
+    Mark clusters that require manual review.
 
-    Un cluster se marca cuando:
-    - su confianza espacial es Review;
-    - participa en un par Manual review;
-    - contiene un Possible duplicate;
-    - contiene un tipo de servicio Unknown o Unclassified.
+    A cluster is marked when:
+    - its spatial confidence is Review;
+    - it participates in a Manual review pair;
+    - it contains a Possible duplicate;
+    - it contains an Unknown or Unclassified service type.
     """
     records_classified = records_classified.copy()
     cluster_summary = cluster_summary.copy()
@@ -1011,16 +935,16 @@ def main() -> None:
         )
 
         print(f"\n{city.upper()}")
-        print(f"Registros totales: {len(df)}")
+        print(f"Total records: {len(df)}")
         print(
-            "Registros con coordenadas válidas: "
+            "Records with valid coordinates: "
             f"{df[['Latitude', 'Longitude']].notna().all(axis=1).sum()}"
         )
 
-        print("\nGenerando pares candidatos...")
+        print("\nGenerating candidate pairs...")
         pairs = build_candidate_pairs(df)
 
-        print(f"Pares a <= 50 m: {len(pairs)}")
+        print(f"Pairs within 50 m: {len(pairs)}")
 
         clustered_records = assign_location_clusters(
             city=city,
@@ -1116,29 +1040,29 @@ def main() -> None:
         )
 
         print(
-            f"Clusters generados: {len(clusters)}"
+            f"Clusters generated: {len(clusters)}"
         )
 
         print(
-            "Clusters con más de un registro: "
+            "Clusters with more than one record: "
             f"{int((clusters['Record_Count'] > 1).sum())}"
         )
 
         print(
-            "Clusters Locker y PUDO: "
+            "Locker and PUDO clusters: "
             f"{int((clusters['Cluster_Service_Type_Code'] == 3).sum())}"
         )
 
         print(
-            f"Pares para revisión manual: "
+            f"Pairs for manual review: "
             f"{len(manual_review)}"
         )
 
-        print(f"Guardado: {records_output}")
-        print(f"Guardado: {clusters_output}")
-        print(f"Guardado: {manual_output}")
-        print(f"Guardado: {candidate_pairs_output}")
-        print(f"Guardado: {cluster_edges_output}")
+        print(f"Saved: {records_output}")
+        print(f"Saved: {clusters_output}")
+        print(f"Saved: {manual_output}")
+        print(f"Saved: {candidate_pairs_output}")
+        print(f"Saved: {cluster_edges_output}")
 
 
 if __name__ == "__main__":

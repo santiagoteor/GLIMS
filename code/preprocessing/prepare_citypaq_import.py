@@ -1,20 +1,15 @@
-from pathlib import Path
-
+from code.common.paths import RESULTS_DIR
 import pandas as pd
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
 INPUT_FILE = (
-    PROJECT_ROOT
-    / "results"
+    RESULTS_DIR
     / "citypaq_source_comparison"
     / "citypaq_possibly_new_all_cities.csv"
 )
 
 OUTPUT_FILE = (
-    PROJECT_ROOT
-    / "results"
+    RESULTS_DIR
     / "citypaq_source_comparison"
     / "citypaq_candidates_for_import.csv"
 )
@@ -61,19 +56,19 @@ def main() -> None:
         encoding="utf-8-sig",
     )
 
-    print(f"Archivo generado: {OUTPUT_FILE}")
-    print(f"Total candidatos: {len(candidates)}")
+    print(f"File generated: {OUTPUT_FILE}")
+    print(f"Total candidates: {len(candidates)}")
 
-    print("\nPor ciudad:")
+    print("\nBy city:")
     print(candidates["City"].value_counts().to_string())
 
-    print("\nFlags de calidad:")
+    print("\nQuality flags:")
     flags = candidates[
         candidates["Data_Quality_Flag"] != ""
     ]
 
     if flags.empty:
-        print("Sin flags")
+        print("No flags")
     else:
         print(
             flags[
