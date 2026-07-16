@@ -9,17 +9,17 @@ from pathlib import Path
 
 RAW_DATA = RAW_DATA_DIR
 
-ARCHIVO_PUNTOS = RAW_DATA / "Points B2C_20250402.xlsx"
-ARCHIVO_CC = RAW_DATA / "CC.xlsx"
+POINTS_FILE = RAW_DATA / "Points B2C_20250402.xlsx"
+CC_FILE = RAW_DATA / "CC.xlsx"
 
-ARCHIVO_CITYPAQ_CANDIDATOS = (
+CITYPAQ_CANDIDATES_FILE = (
     RAW_DATA
     / "citypaq_candidates_for_import.csv"
 )
 
-CARPETA_SALIDA = DATA_DIR
+OUTPUT_DIR = DATA_DIR
 
-CIUDADES = {
+CITIES = {
     "City of Barcelona": "barcelona",
     "City of Madrid": "madrid",
     "City of Valencia": "valencia",
@@ -28,7 +28,7 @@ CIUDADES = {
 # PROBLEM: The current bounding boxes for neighborhoods are hardcoded and may not accurately represent the actual administrative boundaries of the neighborhoods.
 # TODO: Update the bounding boxes to use actual polygonal boundaries of the neighborhoods, possibly by using a geospatial library (e.g., GeoPandas) and shapefiles or GeoJSON files that contain the real boundaries of the neighborhoods. 
 
-LIMITES_BARRIOS = {
+NEIGHBORHOOD_BOUNDARIES = {
     "barcelona": [
         {"barrio": "Eixample", "lat_min": 41.380, "lat_max": 41.405, "lon_min": 2.145, "lon_max": 2.175},
         {"barrio": "Ciutat Vella", "lat_min": 41.370, "lat_max": 41.390, "lon_min": 2.160, "lon_max": 2.190},
@@ -64,7 +64,7 @@ LIMITES_BARRIOS = {
 # PROBLEM: The current implementation uses hardcoded parameters for vehicle models, costs, speeds, CO2 emissions, and capacities in the code.
 # TODO: Refactor the code to read these parameters from an external configuration file (e.g., JSON, YAML, or CSV) to allow for easier updates and maintenance.
 
-PARAMETROS_MODELOS = [
+MODEL_PARAMETERS = [
     {"modelo": "FURGONETA_CONV", "costo_km": 0.45, "costo_hora": 18.0, "v_media": 22.0, "co2_km": 220.0, "capacidad": 60, "fijo_hub_dia": None, "comision_pudo": None, "co2_km_estimado_cliente": None},
     {"modelo": "FURGONETA_ELEC", "costo_km": 0.20, "costo_hora": 18.0, "v_media": 20.0, "co2_km": 0.0, "capacidad": 60, "fijo_hub_dia": None, "comision_pudo": None, "co2_km_estimado_cliente": None},
     {"modelo": "BICICLETA_CARGO", "costo_km": 0.05, "costo_hora": 14.0, "v_media": 14.0, "co2_km": 0.0, "capacidad": 20, "fijo_hub_dia": 45.0, "comision_pudo": None, "co2_km_estimado_cliente": None},
@@ -73,34 +73,34 @@ PARAMETROS_MODELOS = [
 ]
 
 
-def normalizar_texto(texto):
-    if pd.isna(texto):
+def normalize_text(text):
+    if pd.isna(text):
         return pd.NA
 
-    texto = str(texto).replace("\u200b", "")
-    texto = unicodedata.normalize("NFKC", texto)
-    texto = re.sub(r"\s+", " ", texto).strip()
+    text = str(text).replace("\u200b", "")
+    text = unicodedata.normalize("NFKC", text)
+    text = re.sub(r"\s+", " ", text).strip()
 
-    return texto
+    return text
 
 
-def texto_clave(texto):
-    if pd.isna(texto):
+def text_key(text):
+    if pd.isna(text):
         return pd.NA
 
-    texto = normalizar_texto(texto)
-    texto = unicodedata.normalize("NFKD", texto)
-    texto = "".join(c for c in texto if not unicodedata.combining(c))
-    texto = texto.upper().strip()
+    text = normalize_text(text)
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    text = text.upper().strip()
 
-    return texto
+    return text
 
 
-def normalizar_company(valor):
-    if pd.isna(valor):
+def normalize_company(value):
+    if pd.isna(value):
         return pd.NA
 
-    clave = texto_clave(valor)
+    key = text_key(value)
 
     company_map = {
         "AMAZON": "Amazon",
@@ -114,14 +114,14 @@ def normalizar_company(valor):
         "UPS": "UPS",
     }
 
-    return company_map.get(clave, normalizar_texto(valor).title())
+    return company_map.get(key, normalize_text(value).title())
 
 
-def normalizar_type(valor):
-    if pd.isna(valor):
+def normalize_type(value):
+    if pd.isna(value):
         return pd.NA
 
-    clave = texto_clave(valor)
+    key = text_key(value)
 
     type_map = {
         "LOCKER": "Locker",
@@ -138,14 +138,14 @@ def normalizar_type(valor):
         "DROP-OFF POINT": "PUDO",
     }
 
-    return type_map.get(clave, normalizar_texto(valor).title())
+    return type_map.get(key, normalize_text(value).title())
 
 
-def normalizar_infrastructure(valor):
-    if pd.isna(valor):
+def normalize_infrastructure(value):
+    if pd.isna(value):
         return pd.NA
 
-    clave = texto_clave(valor)
+    key = text_key(value)
 
     infrastructure_map = {
         "PUBLICA": "Pública",
@@ -156,14 +156,14 @@ def normalizar_infrastructure(valor):
         "MIXED": "Mixta",
     }
 
-    return infrastructure_map.get(clave, normalizar_texto(valor).title())
+    return infrastructure_map.get(key, normalize_text(value).title())
 
 
-def normalizar_ciudad(valor):
-    if pd.isna(valor):
+def normalize_city(value):
+    if pd.isna(value):
         return pd.NA
 
-    clave = texto_clave(valor)
+    key = text_key(value)
 
     city_map = {
         "BARCELONA": "Barcelona",
@@ -174,10 +174,10 @@ def normalizar_ciudad(valor):
         "VALENCIA VALENCIA": "Valencia",
     }
 
-    return city_map.get(clave, normalizar_texto(valor).title())
+    return city_map.get(key, normalize_text(value).title())
 
 
-def normalizar_columnas_texto(df: pd.DataFrame) -> pd.DataFrame:
+def normalize_text_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     text_cols = [
@@ -194,27 +194,27 @@ def normalizar_columnas_texto(df: pd.DataFrame) -> pd.DataFrame:
     for col in text_cols:
         if col in df.columns:
             df[f"{col}_raw"] = df[col]
-            df[col] = df[col].apply(normalizar_texto)
+            df[col] = df[col].apply(normalize_text)
 
     if "Company" in df.columns:
-        df["Company"] = df["Company"].apply(normalizar_company)
+        df["Company"] = df["Company"].apply(normalize_company)
 
     if "Type" in df.columns:
-        df["Type"] = df["Type"].apply(normalizar_type)
+        df["Type"] = df["Type"].apply(normalize_type)
 
     if "Infrastructure" in df.columns:
-        df["Infrastructure"] = df["Infrastructure"].apply(normalizar_infrastructure)
+        df["Infrastructure"] = df["Infrastructure"].apply(normalize_infrastructure)
 
     if "Type Infrastructure" in df.columns:
-        df["Type Infrastructure"] = df["Type Infrastructure"].apply(normalizar_infrastructure)
+        df["Type Infrastructure"] = df["Type Infrastructure"].apply(normalize_infrastructure)
 
     if "City" in df.columns:
-        df["City"] = df["City"].apply(normalizar_ciudad)
+        df["City"] = df["City"].apply(normalize_city)
 
     return df
 
 
-def agregar_id(df: pd.DataFrame) -> pd.DataFrame:
+def add_id(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     if "ID" not in df.columns:
@@ -223,29 +223,29 @@ def agregar_id(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def encontrar_hoja(excel: pd.ExcelFile, nombre_objetivo: str) -> str:
-    objetivo = normalizar_texto(nombre_objetivo)
+def find_sheet(excel: pd.ExcelFile, target_name: str) -> str:
+    target = normalize_text(target_name)
 
-    for hoja in excel.sheet_names:
-        if normalizar_texto(hoja) == objetivo:
-            return hoja
+    for sheet in excel.sheet_names:
+        if normalize_text(sheet) == target:
+            return sheet
 
     raise ValueError(
-        f"No se encontró la hoja '{nombre_objetivo}'. "
-        f"Hojas disponibles: {excel.sheet_names}"
+        f"Sheet not found '{target_name}'. "
+        f"Available sheets: {excel.sheet_names}"
     )
 
 
-def limpiar_dataframe(df: pd.DataFrame, normalizar_campos: bool = True) -> pd.DataFrame:
+def clean_dataframe(df: pd.DataFrame, normalize_fields: bool = True) -> pd.DataFrame:
     df = df.copy()
 
     df = df.loc[:, ~df.columns.astype(str).str.startswith("Unnamed")]
     df = df.dropna(axis=1, how="all")
 
-    df.columns = [normalizar_texto(c) for c in df.columns]
+    df.columns = [normalize_text(c) for c in df.columns]
 
-    if normalizar_campos:
-        df = normalizar_columnas_texto(df)
+    if normalize_fields:
+        df = normalize_text_columns(df)
 
     for col in ["Latitude", "Longitude"]:
         if col in df.columns:
@@ -260,63 +260,63 @@ def limpiar_dataframe(df: pd.DataFrame, normalizar_campos: bool = True) -> pd.Da
     return df.reset_index(drop=True)
 
 
-def validar_archivos() -> None:
-    if not ARCHIVO_PUNTOS.exists():
-        raise FileNotFoundError(f"No se encontró el archivo de puntos: {ARCHIVO_PUNTOS}")
+def validate_files() -> None:
+    if not POINTS_FILE.exists():
+        raise FileNotFoundError(f"Points file not found: {POINTS_FILE}")
 
-    if not ARCHIVO_CC.exists():
-        raise FileNotFoundError(f"No se encontró el archivo de centros: {ARCHIVO_CC}")
+    if not CC_FILE.exists():
+        raise FileNotFoundError(f"Centers file not found: {CC_FILE}")
 
 
-def exportar_hojas_por_ciudad(
-    archivo_excel: Path,
-    salida: Path,
-    nombre_csv: str,
-    deduplicar: bool = True,
+def export_city_sheets(
+    excel_file: Path,
+    output_dir: Path,
+    csv_name: str,
+    deduplicate: bool = True,
 ):
-    excel = pd.ExcelFile(archivo_excel)
+    excel = pd.ExcelFile(excel_file)
 
-    for hoja_base, ciudad_slug in CIUDADES.items():
-        hoja_real = encontrar_hoja(excel, hoja_base)
+    for base_sheet, city_slug in CITIES.items():
+        sheet_name = find_sheet(excel, base_sheet)
 
         df = pd.read_excel(
-            archivo_excel,
-            sheet_name=hoja_real,
+            excel_file,
+            sheet_name=sheet_name,
             header=1,
         )
 
-        df = limpiar_dataframe(df)
+        df = clean_dataframe(df)
 
-        if deduplicar:
-            columnas_duplicados = [
+        if deduplicate:
+            duplicate_columns = [
                 col for col in ["Company", "Type", "Address", "Latitude", "Longitude"]
                 if col in df.columns
             ]
 
-            if columnas_duplicados:
-                df = df.drop_duplicates(subset=columnas_duplicados).reset_index(drop=True)
+            if duplicate_columns:
+                df = df.drop_duplicates(subset=duplicate_columns).reset_index(drop=True)
 
-        prefijo = Path(nombre_csv).stem.upper()
+        prefix = Path(csv_name).stem.upper()
 
-        df = agregar_id(df)
+        df = add_id(df)
 
-        carpeta_ciudad = salida / ciudad_slug
-        carpeta_ciudad.mkdir(parents=True, exist_ok=True)
+        city_dir = output_dir / city_slug
+        city_dir.mkdir(parents=True, exist_ok=True)
 
-        destino = carpeta_ciudad / nombre_csv
-        df.to_csv(destino, index=False, encoding="utf-8-sig")
+        output_file = city_dir / csv_name
+        df.to_csv(output_file, index=False, encoding="utf-8-sig")
 
-        print(f"{destino} | {len(df):,} filas")
+        print(f"{output_file} | {len(df):,} rows")
 
-def incorporar_candidatos_citypaq(salida: Path) -> None:
-    if not ARCHIVO_CITYPAQ_CANDIDATOS.exists():
+def include_citypaq_candidates(output_dir: Path) -> None:
+    if not CITYPAQ_CANDIDATES_FILE.exists():
         print(
-            "No se encontró el archivo de candidatos CityPaq. "
-            "Se omite la incorporación."
+            "CityPaq candidates file not found. "
+            "Candidate inclusion will be skipped."
         )
         return
 
-    candidatos = pd.read_csv(ARCHIVO_CITYPAQ_CANDIDATOS)
+    candidates = pd.read_csv(CITYPAQ_CANDIDATES_FILE)
 
     city_map = {
         "Barcelona": "barcelona",
@@ -326,146 +326,146 @@ def incorporar_candidatos_citypaq(salida: Path) -> None:
     }
 
     for source_city, city_slug in city_map.items():
-        candidatos_ciudad = candidatos[
-            candidatos["City"] == source_city
+        city_candidates = candidates[
+            candidates["City"] == source_city
         ].copy()
 
-        if candidatos_ciudad.empty:
+        if city_candidates.empty:
             continue
 
-        archivo_salida = salida / city_slug / "puntos_b2c.csv"
+        output_file = output_dir / city_slug / "puntos_b2c.csv"
 
-        if not archivo_salida.exists():
+        if not output_file.exists():
             print(
-                f"No existe {archivo_salida}; "
-                "no se incorporan candidatos."
+                f"File does not exist: {output_file}; "
+                "candidates will not be included."
             )
             continue
 
-        base = pd.read_csv(archivo_salida)
+        base = pd.read_csv(output_file)
 
-        candidatos_ciudad = normalizar_columnas_texto(
-            candidatos_ciudad
+        city_candidates = normalize_text_columns(
+            city_candidates
         )
 
-        columnas_base = list(base.columns)
+        base_columns = list(base.columns)
 
-        for col in columnas_base:
-            if col not in candidatos_ciudad.columns:
-                candidatos_ciudad[col] = pd.NA
+        for col in base_columns:
+            if col not in city_candidates.columns:
+                city_candidates[col] = pd.NA
 
-        for col in candidatos_ciudad.columns:
+        for col in city_candidates.columns:
             if col not in base.columns:
                 base[col] = pd.NA
 
-        candidatos_ciudad = candidatos_ciudad[base.columns]
+        city_candidates = city_candidates[base.columns]
 
-        combinado = pd.concat(
-            [base, candidatos_ciudad],
+        combined = pd.concat(
+            [base, city_candidates],
             ignore_index=True,
         )
 
-        combinado["ID"] = range(1, len(combinado) + 1)
+        combined["ID"] = range(1, len(combined) + 1)
 
-        combinado.to_csv(
-            archivo_salida,
+        combined.to_csv(
+            output_file,
             index=False,
             encoding="utf-8-sig",
         )
 
         print(
-            f"{archivo_salida} | "
-            f"{len(candidatos_ciudad)} candidatos CityPaq incorporados"
+            f"{output_file} | "
+            f"{len(city_candidates)} CityPaq candidates included"
         )
 
-def exportar_resumen_b2c(salida: Path) -> None:
-    registros = []
+def export_b2c_summary(output_dir: Path) -> None:
+    records = []
 
-    for ciudad_slug in CIUDADES.values():
-        archivo = salida / ciudad_slug / "puntos_b2c.csv"
+    for city_slug in CITIES.values():
+        file_path = output_dir / city_slug / "puntos_b2c.csv"
 
-        if not archivo.exists():
+        if not file_path.exists():
             continue
 
-        df = pd.read_csv(archivo)
+        df = pd.read_csv(file_path)
 
         if {"Company", "Type"}.issubset(df.columns):
-            resumen = (
+            summary = (
                 df.groupby(["Company", "Type"])
                 .size()
                 .reset_index(name="count")
             )
-            resumen["city"] = ciudad_slug
-            registros.append(resumen)
+            summary["city"] = city_slug
+            records.append(summary)
 
-    if not registros:
+    if not records:
         return
 
-    resumen_total = pd.concat(registros, ignore_index=True)
+    total_summary = pd.concat(records, ignore_index=True)
 
-    destino = salida / "resumen_b2c_por_company_type.csv"
-    resumen_total.to_csv(destino, index=False, encoding="utf-8-sig")
+    output_file = output_dir / "resumen_b2c_por_company_type.csv"
+    total_summary.to_csv(output_file, index=False, encoding="utf-8-sig")
 
-    print(f"{destino} | {len(resumen_total):,} filas")
-
-
-def exportar_limites_barrios(salida: Path) -> None:
-    for ciudad_slug, barrios in LIMITES_BARRIOS.items():
-        carpeta_ciudad = salida / ciudad_slug
-        carpeta_ciudad.mkdir(parents=True, exist_ok=True)
-
-        destino = carpeta_ciudad / "limites_barrios.csv"
-        pd.DataFrame(barrios).to_csv(destino, index=False, encoding="utf-8-sig")
-
-        print(f"{destino} | {len(barrios):,} barrios")
+    print(f"{output_file} | {len(total_summary):,} rows")
 
 
-def exportar_parametros(salida: Path) -> None:
-    destino = salida / "parametros_modelos.csv"
+def export_neighborhood_boundaries(output_dir: Path) -> None:
+    for city_slug, neighborhoods in NEIGHBORHOOD_BOUNDARIES.items():
+        city_dir = output_dir / city_slug
+        city_dir.mkdir(parents=True, exist_ok=True)
 
-    pd.DataFrame(PARAMETROS_MODELOS).to_csv(
-        destino,
+        output_file = city_dir / "limites_barrios.csv"
+        pd.DataFrame(neighborhoods).to_csv(output_file, index=False, encoding="utf-8-sig")
+
+        print(f"{output_file} | {len(neighborhoods):,} neighborhoods")
+
+
+def export_model_parameters(output_dir: Path) -> None:
+    output_file = output_dir / "parametros_modelos.csv"
+
+    pd.DataFrame(MODEL_PARAMETERS).to_csv(
+        output_file,
         index=False,
         encoding="utf-8-sig",
     )
 
-    print(f"{destino} | {len(PARAMETROS_MODELOS):,} modelos")
+    print(f"{output_file} | {len(MODEL_PARAMETERS):,} models")
 
 
-def preparar_datos() -> None:
-    validar_archivos()
+def prepare_data() -> None:
+    validate_files()
 
-    CARPETA_SALIDA.mkdir(parents=True, exist_ok=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    print("\nExportando puntos B2C...")
-    exportar_hojas_por_ciudad(
-        archivo_excel=ARCHIVO_PUNTOS,
-        salida=CARPETA_SALIDA,
-        nombre_csv="puntos_b2c.csv",
-        deduplicar=False,
+    print("\nExporting B2C points...")
+    export_city_sheets(
+        excel_file=POINTS_FILE,
+        output_dir=OUTPUT_DIR,
+        csv_name="puntos_b2c.csv",
+        deduplicate=False,
     )
-    print("\nIncorporando candidatos CityPaq...")
-    incorporar_candidatos_citypaq(CARPETA_SALIDA)
+    print("\nIncluding CityPaq candidates...")
+    include_citypaq_candidates(OUTPUT_DIR)
 
-    print("\nExportando centros CC...")
-    exportar_hojas_por_ciudad(
-        archivo_excel=ARCHIVO_CC,
-        salida=CARPETA_SALIDA,
-        nombre_csv="centros_cc.csv",
+    print("\nExporting CC centers...")
+    export_city_sheets(
+        excel_file=CC_FILE,
+        output_dir=OUTPUT_DIR,
+        csv_name="centros_cc.csv",
     )
 
-    print("\nExportando resumen B2C por empresa y tipo...")
-    exportar_resumen_b2c(CARPETA_SALIDA)
+    print("\nExporting B2C summary by company and type...")
+    export_b2c_summary(OUTPUT_DIR)
 
-    print("\nExportando límites actuales de barrios...")
-    exportar_limites_barrios(CARPETA_SALIDA)
+    print("\nExporting current neighborhood boundaries...")
+    export_neighborhood_boundaries(OUTPUT_DIR)
 
-    print("\nExportando parámetros de modelos...")
-    exportar_parametros(CARPETA_SALIDA)
+    print("\nExporting model parameters...")
+    export_model_parameters(OUTPUT_DIR)
 
-    print("\nPreparación completada.")
-    print(f"Datos generados en: {CARPETA_SALIDA.resolve()}")
+    print("\nData preparation completed.")
+    print(f"Data generated in: {OUTPUT_DIR.resolve()}")
 
 
 if __name__ == "__main__":
-    preparar_datos()
+    prepare_data()

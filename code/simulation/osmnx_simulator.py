@@ -44,7 +44,7 @@ import numpy as np
 import pandas as pd
 import osmnx as ox
 import networkx as nx
-from code.simulation.simulador import calcular_haversine
+from code.simulation.simulator import calculate_haversine
 from code.common.paths import PROJECT_ROOT
 ox.settings.log_console = True
 ox.settings.use_cache = True
@@ -58,108 +58,108 @@ ox.settings.use_cache = True
 
 BASE_DIR = PROJECT_ROOT
 
-CIUDAD_ACTIVA = "madrid"      # "madrid", "barcelona" o "valencia"
-BARRIO_ACTIVO = "Moratalaz"          # None = todos los barrios / "Moratalaz" = solo uno
-CARPETA_DATA = BASE_DIR / "data"
-CARPETA_RESULTADOS = BASE_DIR / "results"
+ACTIVE_CITY = "madrid"      # "madrid", "barcelona", or "valencia"
+ACTIVE_NEIGHBORHOOD = "Moratalaz"          # None = all neighborhoods / "Moratalaz" = one neighborhood only
+DATA_FOLDER = BASE_DIR / "data"
+RESULTS_FOLDER = BASE_DIR / "results"
 
-def cargar_datos_ciudad(ciudad: str):
-    carpeta_ciudad = CARPETA_DATA / ciudad
+def load_city_data(city: str):
+    city_folder = DATA_FOLDER / city
 
-    puntos = pd.read_csv(carpeta_ciudad / "puntos_b2c.csv")
-    centros = pd.read_csv(carpeta_ciudad / "centros_cc.csv")
-    limites = pd.read_csv(carpeta_ciudad / "limites_barrios.csv")
-    parametros = pd.read_csv(CARPETA_DATA / "parametros_modelos.csv")
+    points = pd.read_csv(city_folder / "puntos_b2c.csv")
+    centers = pd.read_csv(city_folder / "centros_cc.csv")
+    boundaries = pd.read_csv(city_folder / "limites_barrios.csv")
+    parameters = pd.read_csv(DATA_FOLDER / "parametros_modelos.csv")
 
-    return puntos, centros, limites, parametros
-
-
-def obtener_parametros(parametros: pd.DataFrame) -> dict:
-    parametros = parametros.set_index("modelo")
-    return parametros.to_dict(orient="index")
+    return points, centers, boundaries, parameters
 
 
-def cargar_redes(ciudad: str):
+def get_parameters(parameters: pd.DataFrame) -> dict:
+    parameters = parameters.set_index("modelo")
+    return parameters.to_dict(orient="index")
 
-    lugar = f"{ciudad.title()}, Spain"
+
+def load_networks(city: str):
+
+    place = f"{city.title()}, Spain"
 
     G_drive = ox.graph_from_place(
-        lugar,
+        place,
         network_type="drive"
     )
 
-    print(f"Red cargada correctamente")
-    print(f"   Nodos: {len(G_drive.nodes):,}")
-    print(f"   Aristas: {len(G_drive.edges):,}")
+    print("Network loaded successfully")
+    print(f"   Nodes: {len(G_drive.nodes):,}")
+    print(f"   Edges: {len(G_drive.edges):,}")
 
     return G_drive
 
-def construir_subgrafo_barrio(
+def build_neighborhood_subgraph(
     G_drive,
-    barrio,
+    neighborhood,
     buffer=0.01
 ):
 
-    north = barrio["lat_max"] + buffer
-    south = barrio["lat_min"] - buffer
-    east = barrio["lon_max"] + buffer
-    west = barrio["lon_min"] - buffer
+    north = neighborhood["lat_max"] + buffer
+    south = neighborhood["lat_min"] - buffer
+    east = neighborhood["lon_max"] + buffer
+    west = neighborhood["lon_min"] - buffer
 
     return ox.truncate.truncate_graph_bbox(
         G_drive,
         bbox=(west, south, east, north)
     )
 
-def asignar_nodos(
-    puntos,
-    centros,
+def assign_nodes(
+    points,
+    centers,
     G_drive
 ):
     
-    print("Asociando clientes y centros a la red de OpenStreetMap...")
+    print("Matching clients and logistics centers to the OpenStreetMap network...")
 
-    puntos = puntos.copy()
-    centros = centros.copy()
+    points = points.copy()
+    centers = centers.copy()
 
-    puntos["node_drive"] = ox.distance.nearest_nodes(
+    points["node_drive"] = ox.distance.nearest_nodes(
         G_drive,
-        puntos["Longitude"],
-        puntos["Latitude"]
+        points["Longitude"],
+        points["Latitude"]
     )
 
-    # Centros logísticos
+    # Logistics centers
 
-    centros["node_drive"] = ox.distance.nearest_nodes(
+    centers["node_drive"] = ox.distance.nearest_nodes(
         G_drive,
-        centros["Longitude"],
-        centros["Latitude"]
+        centers["Longitude"],
+        centers["Latitude"]
     )
 
-    print(f"{len(puntos)} clientes asociados a nodos de la red.")
+    print(f"{len(points)} clients matched to network nodes.")
 
-    return puntos, centros
+    return points, centers
 
 
-def filtrar_puntos_barrio(puntos: pd.DataFrame, barrio: pd.Series):
-    return puntos[
-        (puntos["Latitude"].between(barrio["lat_min"], barrio["lat_max"]))
-        & (puntos["Longitude"].between(barrio["lon_min"], barrio["lon_max"]))
+def filter_neighborhood_points(points: pd.DataFrame, neighborhood: pd.Series):
+    return points[
+        (points["Latitude"].between(neighborhood["lat_min"], neighborhood["lat_max"]))
+        & (points["Longitude"].between(neighborhood["lon_min"], neighborhood["lon_max"]))
     ].copy()
 
 # PROBLEM: the microhub/PUDO is assumed to be at the centroid of the neighborhood; there is no location decision, which is the core of the promised LRP (PR1/PR2).
 # TODO: Implement an optimization model to determine the optimal location of the microhub/PUDO within the neighborhood, considering candidate locations such as parking lots, markets, post offices, metro stations, and lockers. 
 
-def preparar_barrio(
-    puntos_barrio,
+def prepare_neighborhood(
+    neighborhood_points,
     G_drive
 ):
 
-    # Centroide
-    lat = puntos_barrio["Latitude"].mean()
-    lon = puntos_barrio["Longitude"].mean()
+    # Centroid
+    lat = neighborhood_points["Latitude"].mean()
+    lon = neighborhood_points["Longitude"].mean()
 
-    # Nodo del centroide
-    centro_drive = ox.distance.nearest_nodes(
+    # Centroid node
+    centroid_drive_node = ox.distance.nearest_nodes(
         G_drive,
         lon,
         lat
@@ -168,39 +168,39 @@ def preparar_barrio(
     return {
         "lat": lat,
         "lon": lon,
-        "centro_drive": centro_drive,
-        "clientes_drive": puntos_barrio["node_drive"].tolist()
+        "centro_drive": centroid_drive_node,
+        "clientes_drive": neighborhood_points["node_drive"].tolist()
     }
 
 
-def seleccionar_centro_logistico(
-    centros: pd.DataFrame,
-    nodo_centroide: int,
+def select_logistics_center(
+    centers: pd.DataFrame,
+    centroid_node: int,
     G_drive
 ):
     """
-    Selecciona el centro logístico más cercano al centroide del barrio
-    utilizando la red viaria.
+    Select the logistics center closest to the neighborhood centroid
+    using the road network.
     """
 
-    # Distancias desde el centroide a toda la red
-    distancias = nx.single_source_dijkstra_path_length(
+    # Distances from the centroid to the entire network
+    distances = nx.single_source_dijkstra_path_length(
         G_drive,
-        nodo_centroide,
+        centroid_node,
         weight="length"
     )
 
-    centros = centros.copy()
+    centers = centers.copy()
 
-    centros["distancia_km"] = centros["node_drive"].apply(
-        lambda nodo: distancias.get(nodo, np.inf) / 1000
+    centers["distancia_km"] = centers["node_drive"].apply(
+        lambda node: distances.get(node, np.inf) / 1000
     )
 
-    cc = centros.loc[
-        centros["distancia_km"].idxmin()
+    selected_center = centers.loc[
+        centers["distancia_km"].idxmin()
     ]
 
-    return cc
+    return selected_center
 
 # PROBLEM: The current implementation constructs a dense distance matrix by running Dijkstra's algorithm for each node in the subgraph. 
 # This approach does not scale well, especially when dealing with multiple neighborhoods across different cities. Additionally, much of the computed data is only used for the Traveling Salesman Problem (TSP), 
@@ -210,75 +210,75 @@ def seleccionar_centro_logistico(
 # possibly by leveraging more efficient graph traversal algorithms or data structures. This will improve performance and scalability. 
 
 
-def construir_matriz_distancias(
+def build_distance_matrix(
     G,
-    lista_nodos
+    node_list
 ):
 
-    print("Calculando rutas mínimas con Dijkstra...")
+    print("Calculating shortest paths with Dijkstra...")
 
-    lista_nodos = list(dict.fromkeys(lista_nodos))
+    node_list = list(dict.fromkeys(node_list))
 
-    n = len(lista_nodos)
+    n = len(node_list)
 
-    matriz = np.full(
+    matrix = np.full(
         (n, n),
         np.inf
     )
 
-    mapa_nodos = {
-        nodo: i 
-        for i, nodo in enumerate(lista_nodos)
+    node_map = {
+        node: i 
+        for i, node in enumerate(node_list)
     }
 
-    for origen in lista_nodos:
+    for origin in node_list:
 
-        i = mapa_nodos[origen]
+        i = node_map[origin]
 
-        distancias = nx.single_source_dijkstra_path_length(
+        distances = nx.single_source_dijkstra_path_length(
             G,
-            origen,
+            origin,
             weight="length"
         )
 
-        for destino in lista_nodos:
+        for destination in node_list:
 
-            j = mapa_nodos[destino]
+            j = node_map[destination]
 
-            matriz[i, j] = (
-                distancias.get(destino, np.inf)
+            matrix[i, j] = (
+                distances.get(destination, np.inf)
                 / 1000
             )
 
-    return matriz, mapa_nodos
+    return matrix, node_map
 
 
-def obtener_matrices_barrio(
-    info_barrio,
+def get_neighborhood_matrices(
+    neighborhood_info,
     G_drive
 ):
     """
-    Construye las matrices de distancias del barrio
-    para coche, bicicleta y peatón.
+    Build the neighborhood distance matrices
+    for driving, cycling, and walking.
     """
 
-    nodos_drive = (
-        [info_barrio["centro_drive"]]
-        + info_barrio["clientes_drive"])
+    drive_nodes = (
+        [neighborhood_info["centro_drive"]]
+        + neighborhood_info["clientes_drive"])
 
     print(
-        f"\nConstruyendo matriz de distancias "
-        f"sobre la red OSM ({len(nodos_drive)} nodos)..."
+        f"\nBuilding distance matrix "
+        f"on the OSM network ({len(drive_nodes)} nodes)..."
     )
 
-    matriz_drive, mapa_nodos = construir_matriz_distancias(
+    drive_matrix, node_map = build_distance_matrix(
         G_drive,
-        nodos_drive
+        drive_nodes
     )
 
-    print("Matriz de distancias creada mediante Dijkstra.")
+    print("Distance matrix created with Dijkstra.")
 
-    return matriz_drive, mapa_nodos
+    return drive_matrix, node_map
 
 # PROBLEM: blocks of commented-out code and debug print statements are embedded in the main flow, which clutters and confuses the code.
 # TODO: Remove commented-out code and replace print statements with configurable logging.
@@ -307,142 +307,142 @@ def obtener_matrices_barrio(
 # TODO: Optimization nucleus: Implement a multi-start Clarke-Wright Savings (CWS) algorithm followed by an Iterated Local Search (ILS) metaheuristic to solve the TSP with an objective 
 # function that penalizes CO2 emissions and traversing through vulnerable zones. 
 
-def tsp_vecino_mas_cercano(
-    nodo_inicio,
-    clientes,
-    matriz,
-    mapa_nodos
+def nearest_neighbor_tsp(
+    start_node,
+    clients,
+    matrix,
+    node_map
 ):
 
-    pendientes = clientes.copy()
+    pending = clients.copy()
 
-    nodo_actual = nodo_inicio
+    current_node = start_node
 
     km = 0
 
-    while pendientes:
+    while pending:
 
-        siguiente = min(
-            pendientes,
-            key=lambda nodo:
-                matriz[
-                    mapa_nodos[nodo_actual],
-                    mapa_nodos[nodo]
+        next_node = min(
+            pending,
+            key=lambda node:
+                matrix[
+                    node_map[current_node],
+                    node_map[node]
                 ]
         )
 
-        km += matriz[
-            mapa_nodos[nodo_actual],
-            mapa_nodos[siguiente]
+        km += matrix[
+            node_map[current_node],
+            node_map[next_node]
         ]
 
-        pendientes.remove(siguiente)
+        pending.remove(next_node)
 
-        nodo_actual = siguiente
+        current_node = next_node
 
 
-    km += matriz[
-        mapa_nodos[nodo_actual],
-        mapa_nodos[nodo_inicio]
+    km += matrix[
+        node_map[current_node],
+        node_map[start_node]
     ]
 
     return km
 
 
-def calcular_distancia_radial(
+def calculate_radial_distance(
     nodo_origen,
-    clientes,
-    matriz,
-    mapa_nodos
+    clients,
+    matrix,
+    node_map
 ):
 
-    distancia = 0
+    distance = 0
 
-    for cliente in clientes:
+    for client in clients:
 
-        distancia += (
-            matriz[
-                mapa_nodos[nodo_origen],
-                mapa_nodos[cliente]
+        distance += (
+            matrix[
+                node_map[nodo_origen],
+                node_map[client]
             ] * 2
         )
 
-    return distancia
+    return distance
 
 
-def simular_barrio(
-    ciudad: str,
-    nombre_barrio: str,
-    puntos_barrio: pd.DataFrame,
-    centros: pd.DataFrame,
-    parametros: dict,
+def simulate_neighborhood(
+    city: str,
+    neighborhood_name: str,
+    neighborhood_points: pd.DataFrame,
+    centers: pd.DataFrame,
+    parameters: dict,
     G_drive,
-    barrio: pd.Series,
+    neighborhood: pd.Series,
 ):
 
-    num_paquetes = len(puntos_barrio)
+    package_count = len(neighborhood_points)
 
-    if num_paquetes == 0:
+    if package_count == 0:
         return []
 
     # --------------------------------------------------
-    # Preparación del barrio
+    # Neighborhood preparation
     # --------------------------------------------------
 
-    info_barrio = preparar_barrio(
-        puntos_barrio,
+    neighborhood_info = prepare_neighborhood(
+        neighborhood_points,
         G_drive
     )
 
-    print("Centroide:", info_barrio["lat"], info_barrio["lon"])
+    print("Centroid:", neighborhood_info["lat"], neighborhood_info["lon"])
 
-    nodo = info_barrio["centro_drive"]
+    node = neighborhood_info["centro_drive"]
 
-    print("Nodo:", G_drive.nodes[nodo]["y"], G_drive.nodes[nodo]["x"])
+    print("Node:", G_drive.nodes[node]["y"], G_drive.nodes[node]["x"])
 
     print(
-        "Separación:",
-        calcular_haversine(
-            info_barrio["lat"],
-            info_barrio["lon"],
-            G_drive.nodes[nodo]["y"],
-            G_drive.nodes[nodo]["x"]
+        "Separation:",
+        calculate_haversine(
+            neighborhood_info["lat"],
+            neighborhood_info["lon"],
+            G_drive.nodes[node]["y"],
+            G_drive.nodes[node]["x"]
         )
     )
 
     # --------------------------------------------------
-    # Selección del centro logístico
+    # Logistics center selection
     # --------------------------------------------------
 
-    cc_seleccionado = seleccionar_centro_logistico(
-        centros,
-        info_barrio["centro_drive"],
+    selected_cc = select_logistics_center(
+        centers,
+        neighborhood_info["centro_drive"],
         G_drive
     )
 
     # PROBLEM: truncate_graph_bbox and nearest_nodes changed their signatures between OSMnx 1.x and 2.x; without a pinned version, the code may break.
     # TODO: Ensure a reproducible environment with pinned dependencies to avoid compatibility issues with OSMnx updates.
 
-    G_barrio = construir_subgrafo_barrio(
+    neighborhood_graph = build_neighborhood_subgraph(
         G_drive,
-        barrio    
+        neighborhood    
     )
 
     print(
-        f"Centro logístico seleccionado: "
-        f"{cc_seleccionado['Location']}"
+        f"Selected logistics center: "
+        f"{selected_cc['Location']}"
     )
     # --------------------------------------------------
-    # Construcción de la matriz de distancias
+    # Distance matrix construction
     # --------------------------------------------------
 
-    matriz_drive, mapa_nodos = obtener_matrices_barrio(
-        info_barrio,
-        G_barrio
+    drive_matrix, node_map = get_neighborhood_matrices(
+        neighborhood_info,
+        neighborhood_graph
     )
 
     # --------------------------------------------------
-    # Distancia troncal
+    # Trunk distance
     # --------------------------------------------------
 
     # distancia_troncal = distancia_cc_barrio(
@@ -451,12 +451,12 @@ def simular_barrio(
     #     matriz_drive
     # )
 
-    distancia_troncal = (
+    trunk_distance = (
         nx.astar_path_length(
             G_drive,
-            cc_seleccionado["node_drive"],
-            info_barrio["centro_drive"],
-            heuristic=lambda u, v: calcular_haversine(
+            selected_cc["node_drive"],
+            neighborhood_info["centro_drive"],
+            heuristic=lambda u, v: calculate_haversine(
                 G_drive.nodes[u]["y"],
                 G_drive.nodes[u]["x"],
                 G_drive.nodes[v]["y"],
@@ -468,12 +468,12 @@ def simular_barrio(
     )
 
     print(
-        f"Distancia por carretera CC → barrio: "
-        f"{distancia_troncal:.2f} km"
+        f"Road distance from CC to neighborhood: "
+        f"{trunk_distance:.2f} km"
     )
 
     # --------------------------------------------------
-    # Kilómetros internos (TSP)
+    # Internal kilometers (TSP)
     # --------------------------------------------------
 
     # PROBLEM: It does not consider the vehicle capacity, it just calculates the TSP for all clients in the neighborhood. This is not realistic for delivery scenarios where vehicles have limited capacity.
@@ -484,105 +484,105 @@ def simular_barrio(
     ### For each group, calculate the optimal internal route (TSP)
     ### Sum the kilometers of all internal routes (one per group) plus the round trips to the CC.
 
-    km_internos = tsp_vecino_mas_cercano(
-        info_barrio["centro_drive"],
-        info_barrio["clientes_drive"],
-        matriz_drive,
-        mapa_nodos
+    internal_km = nearest_neighbor_tsp(
+        neighborhood_info["centro_drive"],
+        neighborhood_info["clientes_drive"],
+        drive_matrix,
+        node_map
     )
 
     # --------------------------------------------------
-    # Distancia radial (PUDO y reparto a pie)
+    # Radial distance (PUDO and walking delivery)
     # --------------------------------------------------
 
     # PROBLEM: The radial distance for the delivery person on foot (km_repartidor_pie) is calculated using the drive network, which may not accurately reflect the actual walking distances. 
     # This could lead to underestimating or overestimating the distances and times for pedestrian deliveries.
     # TODO: Consider using a pedestrian network (if available) to calculate the radial distance for the delivery person on foot. This would provide a more accurate estimate of the distances and times for pedestrian deliveries.
 
-    km_repartidor_pie = calcular_distancia_radial(
-        info_barrio["centro_drive"],
-        info_barrio["clientes_drive"],
-        matriz_drive,
-        mapa_nodos
+    courier_walking_km = calculate_radial_distance(
+        neighborhood_info["centro_drive"],
+        neighborhood_info["clientes_drive"],
+        drive_matrix,
+        node_map
     )
 
-    resultados = []
+    results = []
 
     # ==================================================
     # M1
     # ==================================================
 
-    m1 = parametros["FURGONETA_CONV"]
+    m1 = parameters["FURGONETA_CONV"]
 
-    viajes_1 = int(np.ceil(num_paquetes / m1["capacidad"]))
+    trips_1 = int(np.ceil(package_count / m1["capacidad"]))
 
-    km_totales_1 = (
-        distancia_troncal * 2 * viajes_1
-        + km_internos
+    total_km_1 = (
+        trunk_distance * 2 * trips_1
+        + internal_km
     )
 
-    costo_1 = (
-        km_totales_1 * m1["costo_km"]
-        + (km_totales_1 / m1["v_media"]) * m1["costo_hora"]
+    cost_1 = (
+        total_km_1 * m1["costo_km"]
+        + (total_km_1 / m1["v_media"]) * m1["costo_hora"]
     )
 
     co2_1 = (
-        km_totales_1 * m1["co2_km"]
+        total_km_1 * m1["co2_km"]
     ) / 1000
 
-    resultados.append({
-        "ciudad": ciudad,
-        "barrio": nombre_barrio,
+    results.append({
+        "ciudad": city,
+        "barrio": neighborhood_name,
         "modelo": "M1: Furgoneta Combustión desde CC",
-        "centro_logistico": cc_seleccionado["Location"],
-        "paquetes": num_paquetes,
-        "distancia_troncal_km": distancia_troncal,
-        "km_recorridos": km_totales_1,
-        "numero_viajes": viajes_1,
+        "centro_logistico": selected_cc["Location"],
+        "paquetes": package_count,
+        "distancia_troncal_km": trunk_distance,
+        "km_recorridos": total_km_1,
+        "numero_viajes": trips_1,
         "emisiones_co2_kg": co2_1,
-        "costo_total_eur": costo_1,
+        "costo_total_eur": cost_1,
     })
 
     # ==================================================
     # M2
     # ==================================================
 
-    m2 = parametros["FURGONETA_ELEC"]
+    m2 = parameters["FURGONETA_ELEC"]
 
-    viajes_2 = int(np.ceil(num_paquetes / m2["capacidad"]))
+    trips_2 = int(np.ceil(package_count / m2["capacidad"]))
 
-    km_totales_2 = (
-        distancia_troncal * 2 * viajes_2
-        + km_internos
+    total_km_2 = (
+        trunk_distance * 2 * trips_2
+        + internal_km
     )
 
-    costo_2 = (
-        km_totales_2 * m2["costo_km"]
-        + (km_totales_2 / m2["v_media"]) * m2["costo_hora"]
+    cost_2 = (
+        total_km_2 * m2["costo_km"]
+        + (total_km_2 / m2["v_media"]) * m2["costo_hora"]
     )
 
-    resultados.append({
-        "ciudad": ciudad,
-        "barrio": nombre_barrio,
+    results.append({
+        "ciudad": city,
+        "barrio": neighborhood_name,
         "modelo": "M2: Furgoneta Eléctrica desde CC",
-        "centro_logistico": cc_seleccionado["Location"],
-        "paquetes": num_paquetes,
-        "distancia_troncal_km": distancia_troncal,
-        "km_recorridos": km_totales_2,
-        "numero_viajes": viajes_2,
+        "centro_logistico": selected_cc["Location"],
+        "paquetes": package_count,
+        "distancia_troncal_km": trunk_distance,
+        "km_recorridos": total_km_2,
+        "numero_viajes": trips_2,
         "emisiones_co2_kg": 0.0,
-        "costo_total_eur": costo_2,
+        "costo_total_eur": cost_2,
     })
 
     # ==================================================
     # M3
     # ==================================================
 
-    m3 = parametros["BICICLETA_CARGO"]
+    m3 = parameters["BICICLETA_CARGO"]
 
-    viajes_bike = int(np.ceil(num_paquetes / m3["capacidad"]))
+    bike_trips = int(np.ceil(package_count / m3["capacidad"]))
 
-    km_abastecimiento_hub = distancia_troncal * 2
+    hub_supply_km = trunk_distance * 2
 
     # PROBLEM: The code currently uses the parameters of "FURGONETA_CONV" (conventional van) for the trunk leg from the CC to the hub in models M3, M4, and M5. 
     # However, according to the project specifications, this trunk leg should use the parameters of "FURGONETA_ELEC" (electric van) for sustainable scenarios. This discrepancy leads to inflated emissions and costs in the green scenarios.
@@ -590,136 +590,136 @@ def simular_barrio(
     # TODO: Update the code to use the correct vehicle parameters for the trunk leg in models M3, M4, and M5. 
     # Specifically, replace the references to "FURGONETA_CONV" with "FURGONETA_ELEC" when calculating the cost and CO₂ emissions for the CC→hub leg.
 
-    costo_camion_hub = (
-        km_abastecimiento_hub
-        * parametros["FURGONETA_CONV"]["costo_km"]
+    hub_truck_cost = (
+        hub_supply_km
+        * parameters["FURGONETA_CONV"]["costo_km"]
     )
 
-    co2_camion_hub = (
-        km_abastecimiento_hub
-        * parametros["FURGONETA_CONV"]["co2_km"]
+    hub_truck_co2 = (
+        hub_supply_km
+        * parameters["FURGONETA_CONV"]["co2_km"]
     ) / 1000
 
-    km_bike_internos = km_internos * 1.15
+    internal_bike_km = internal_km * 1.15
 
     # PROBLEM: The current implementation uses a fixed factor of 1.15 to account for the deviation in bicycle routes compared to the optimal TSP route.
     # TODO: Validate the 1.15 deviation factor for bicycle routes against real-world data or consider using actual routing algorithms to calculate more accurate bicycle distances. 
 
-    costo_bike = (
-        km_bike_internos * m3["costo_km"]
-        + (km_bike_internos / m3["v_media"]) * m3["costo_hora"]
+    bike_cost = (
+        internal_bike_km * m3["costo_km"]
+        + (internal_bike_km / m3["v_media"]) * m3["costo_hora"]
     )
 
-    resultados.append({
-        "ciudad": ciudad,
-        "barrio": nombre_barrio,
+    results.append({
+        "ciudad": city,
+        "barrio": neighborhood_name,
         "modelo": "M3: CC -> Microhub -> Bicicleta",
-        "centro_logistico": cc_seleccionado["Location"],
-        "paquetes": num_paquetes,
-        "distancia_troncal_km": distancia_troncal,
-        "km_recorridos": km_abastecimiento_hub + km_bike_internos,
-        "numero_viajes": 1 + viajes_bike,
-        "emisiones_co2_kg": co2_camion_hub,
-        "costo_total_eur": costo_camion_hub + costo_bike + m3["fijo_hub_dia"],
+        "centro_logistico": selected_cc["Location"],
+        "paquetes": package_count,
+        "distancia_troncal_km": trunk_distance,
+        "km_recorridos": hub_supply_km + internal_bike_km,
+        "numero_viajes": 1 + bike_trips,
+        "emisiones_co2_kg": hub_truck_co2,
+        "costo_total_eur": hub_truck_cost + bike_cost + m3["fijo_hub_dia"],
     })
 
     # ==================================================
     # M4
     # ==================================================
 
-    m4 = parametros["PUDO_A_PIE"]
+    m4 = parameters["PUDO_A_PIE"]
 
-    viajes_pie = int(np.ceil(num_paquetes / m4["capacidad"]))
+    walking_trips = int(np.ceil(package_count / m4["capacidad"]))
 
-    costo_pie = (
-        km_repartidor_pie / m4["v_media"]
+    walking_cost = (
+        courier_walking_km / m4["v_media"]
     ) * m4["costo_hora"]
 
-    resultados.append({
-        "ciudad": ciudad,
-        "barrio": nombre_barrio,
+    results.append({
+        "ciudad": city,
+        "barrio": neighborhood_name,
         "modelo": "M4: CC -> PUDO -> Entrega a pie",
-        "centro_logistico": cc_seleccionado["Location"],
-        "paquetes": num_paquetes,
-        "distancia_troncal_km": distancia_troncal,
-        "km_recorridos": km_abastecimiento_hub + km_repartidor_pie,
-        "numero_viajes": 1 + viajes_pie,
-        "emisiones_co2_kg": co2_camion_hub,
+        "centro_logistico": selected_cc["Location"],
+        "paquetes": package_count,
+        "distancia_troncal_km": trunk_distance,
+        "km_recorridos": hub_supply_km + courier_walking_km,
+        "numero_viajes": 1 + walking_trips,
+        "emisiones_co2_kg": hub_truck_co2,
         "costo_total_eur": (
-            costo_camion_hub
-            + costo_pie
-            + num_paquetes * m4["comision_pudo"]
+            hub_truck_cost
+            + walking_cost
+            + package_count * m4["comision_pudo"]
         ),
     })
 
-    cliente = info_barrio["clientes_drive"][0]
+    client = neighborhood_info["clientes_drive"][0]
 
     print(
         "OSM:",
-        matriz_drive[
-            mapa_nodos[info_barrio["centro_drive"]],
-            mapa_nodos[cliente]
+        drive_matrix[
+            node_map[neighborhood_info["centro_drive"]],
+            node_map[client]
         ]
     )
 
-    fila = puntos_barrio.iloc[0]
+    row = neighborhood_points.iloc[0]
 
-    print("HAV:", calcular_haversine(
-        info_barrio["lat"],
-        info_barrio["lon"],
-        fila["Latitude"],
-        fila["Longitude"]
+    print("HAV:", calculate_haversine(
+        neighborhood_info["lat"],
+        neighborhood_info["lon"],
+        row["Latitude"],
+        row["Longitude"]
     ))
 
     # ==================================================
     # M5
     # ==================================================
 
-    m5 = parametros["PUDO_CONSUMIDOR"]
+    m5 = parameters["PUDO_CONSUMIDOR"]
 
-    co2_clientes = (
-        km_repartidor_pie
+    customer_co2 = (
+        courier_walking_km
         * m5["co2_km_estimado_cliente"]
     ) / 1000
 
-    resultados.append({
-        "ciudad": ciudad,
-        "barrio": nombre_barrio,
+    results.append({
+        "ciudad": city,
+        "barrio": neighborhood_name,
         "modelo": "M5: CC -> PUDO -> Recogida Cliente",
-        "centro_logistico": cc_seleccionado["Location"],
-        "paquetes": num_paquetes,
-        "distancia_troncal_km": distancia_troncal,
-        "km_recorridos": km_abastecimiento_hub + km_repartidor_pie,
-        "numero_viajes": 1 + num_paquetes,
-        "emisiones_co2_kg": co2_camion_hub + co2_clientes,
+        "centro_logistico": selected_cc["Location"],
+        "paquetes": package_count,
+        "distancia_troncal_km": trunk_distance,
+        "km_recorridos": hub_supply_km + courier_walking_km,
+        "numero_viajes": 1 + package_count,
+        "emisiones_co2_kg": hub_truck_co2 + customer_co2,
         "costo_total_eur": (
-            costo_camion_hub
-            + num_paquetes * m5["comision_pudo"]
+            hub_truck_cost
+            + package_count * m5["comision_pudo"]
         ),
     })
 
-    return resultados
+    return results
 
 # PROBLEM: One single run per neighborhood; there is no stochasticity or Monte Carlo simulation, even though PR3/PR4 mention variability in demand and density.
 # TODO: Implement multiple runs with variable demand and density, and calculate confidence intervals for the results to account for stochasticity in the simulation.
 
-def simular_ciudad(
-    ciudad: str,
-    barrio_activo: str | None = None
+def simulate_city(
+    city: str,
+    active_neighborhood: str | None = None
 ):
 
     # ---------------------------------------------
-    # Carga de datos
+    # Data loading
     # ---------------------------------------------
 
-    puntos, centros, limites, parametros_df = cargar_datos_ciudad(ciudad)
-    parametros = obtener_parametros(parametros_df)
+    points, centers, boundaries, parameters_df = load_city_data(city)
+    parameters = get_parameters(parameters_df)
 
     # ---------------------------------------------
-    # Carga de la red viaria
+    # Road network loading
     # ---------------------------------------------
 
-    G_drive = cargar_redes(ciudad)
+    G_drive = load_networks(city)
 
     ## PROBELM: The current implementation uses OSMnx to download and prepare the road network for the city. 
     # However, it does not provide any references or citations to support the choice of using OSMnx or the specific methods employed for shortest-path calculations. 
@@ -727,127 +727,127 @@ def simular_ciudad(
     # TODO: Include references to relevant literature, such as Boeing (2017) or other studies that validate the use of OSMnx and shortest-path algorithms for urban logistics simulations. 
 
     # ---------------------------------------------
-    # Asignación de nodos OSM
+    # OSM node assignment
     # ---------------------------------------------
 
-    print("\nAsignando cada cliente al nodo más cercano de la red OSM...")
+    print("\nAssigning each client to the nearest OSM network node...")
 
-    puntos, centros = asignar_nodos(
-        puntos,
-        centros,
+    points, centers = assign_nodes(
+        points,
+        centers,
         G_drive
     )
 
-    print(f"Clientes asociados a la red: {len(puntos)}")
-    print(f"Centros logísticos asociados: {len(centros)}")
+    print(f"Clients matched to the network: {len(points)}")
+    print(f"Logistics centers matched: {len(centers)}")
 
-    resultados_totales = []
+    all_results = []
 
     # ---------------------------------------------
-    # Filtrar barrio si procede
+    # Filter neighborhood when applicable
     # ---------------------------------------------
 
-    if barrio_activo is not None:
+    if active_neighborhood is not None:
 
-        limites = limites[
-            limites["barrio"].str.lower()
-            == barrio_activo.lower()
+        boundaries = boundaries[
+            boundaries["barrio"].str.lower()
+            == active_neighborhood.lower()
         ]
 
-        if limites.empty:
+        if boundaries.empty:
             raise ValueError(
-                f"No se encontró el barrio '{barrio_activo}' en {ciudad}."
+                f"Neighborhood '{active_neighborhood}' was not found in {city}."
             )
 
     # ---------------------------------------------
-    # Simulación barrio a barrio
+    # Neighborhood-by-neighborhood simulation
     # ---------------------------------------------
 
-    for _, barrio in limites.iterrows():
+    for _, neighborhood in boundaries.iterrows():
 
-        nombre_barrio = barrio["barrio"]
+        neighborhood_name = neighborhood["barrio"]
 
-        print(f"\n📍 Simulando {ciudad.upper()} - {nombre_barrio}")
+        print(f"\n📍 Simulating {city.upper()} - {neighborhood_name}")
 
-        puntos_barrio = filtrar_puntos_barrio(
-            puntos,
-            barrio
+        neighborhood_points = filter_neighborhood_points(
+            points,
+            neighborhood
         )
 
-        if puntos_barrio.empty:
+        if neighborhood_points.empty:
 
             print(
-                f"⚠️ No hay puntos dentro de los límites de {nombre_barrio}."
+                f"⚠️ There are no points within the boundaries of {neighborhood_name}."
             )
 
             continue
 
-        resultados = simular_barrio(
-            ciudad=ciudad,
-            nombre_barrio=nombre_barrio,
-            puntos_barrio=puntos_barrio,
-            centros=centros,
-            barrio=barrio,
-            parametros=parametros,
+        results = simulate_neighborhood(
+            city=city,
+            neighborhood_name=neighborhood_name,
+            neighborhood_points=neighborhood_points,
+            centers=centers,
+            neighborhood=neighborhood,
+            parameters=parameters,
             G_drive=G_drive
         )
 
-        resultados_totales.extend(resultados)
+        all_results.extend(results)
 
         print(
-            f"✅ {nombre_barrio}: {len(puntos_barrio)} paquetes simulados"
+            f"✅ {neighborhood_name}: {len(neighborhood_points)} packages simulated"
         )
 
-    return pd.DataFrame(resultados_totales)
+    return pd.DataFrame(all_results)
 
 
 # =============================================================================
-# 7. EJECUCIÓN
+# 7. EXECUTION
 # =============================================================================
 
 if __name__ == "__main__":
 
     print("=" * 60)
-    print("SIMULACIÓN LOGÍSTICA BASADA EN OpenStreetMap")
+    print("OPENSTREETMAP-BASED LOGISTICS SIMULATION")
     print("=" * 60)
-    print(f"Ciudad: {CIUDAD_ACTIVA}")
-    print(f"Barrio: {BARRIO_ACTIVO}")
-    print(f"Versión OSMnx: {ox.__version__}")
-    print("Tipo de red: drive")
+    print(f"City: {ACTIVE_CITY}")
+    print(f"Neighborhood: {ACTIVE_NEIGHBORHOOD}")
+    print(f"OSMnx version: {ox.__version__}")
+    print("Network type: drive")
     print("=" * 60)
 
-    CARPETA_RESULTADOS.mkdir(parents=True, exist_ok=True)
+    RESULTS_FOLDER.mkdir(parents=True, exist_ok=True)
 
-    print("Cargando datos...")
-    print("Descargando/preparando red viaria...")
+    print("Loading data...")
+    print("Downloading/preparing road network...")
 
-    df_resultados = simular_ciudad(
-        ciudad=CIUDAD_ACTIVA,
-        barrio_activo=BARRIO_ACTIVO,
+    results_df = simulate_city(
+        city=ACTIVE_CITY,
+        active_neighborhood=ACTIVE_NEIGHBORHOOD,
     )
 
-    if df_resultados.empty:
-        print("\nNo se generaron resultados.")
+    if results_df.empty:
+        print("\nNo results were generated.")
 
     else:
 
-        df_resultados = df_resultados.round(2)
+        results_df = results_df.round(2)
 
-        print("\nRESULTADOS")
-        print(df_resultados.to_string(index=False))
+        print("\nRESULTS")
+        print(results_df.to_string(index=False))
 
-        nombre_archivo = (
-            f"resultados_{CIUDAD_ACTIVA}.csv"
-            if BARRIO_ACTIVO is None
-            else f"resultados_{CIUDAD_ACTIVA}_{BARRIO_ACTIVO}.csv"
+        output_filename = (
+            f"resultados_{ACTIVE_CITY}.csv"
+            if ACTIVE_NEIGHBORHOOD is None
+            else f"resultados_{ACTIVE_CITY}_{ACTIVE_NEIGHBORHOOD}.csv"
         )
 
-        ruta_salida = CARPETA_RESULTADOS / nombre_archivo
+        output_path = RESULTS_FOLDER / output_filename
 
-        df_resultados.to_csv(
-            ruta_salida,
+        results_df.to_csv(
+            output_path,
             index=False,
             encoding="utf-8-sig",
         )
 
-        print(f"\nResultados guardados en: {ruta_salida.resolve()}")
+        print(f"\nResults saved to: {output_path.resolve()}")

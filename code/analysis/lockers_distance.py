@@ -99,7 +99,7 @@ def classify_pair(score, same_company):
 
 for city in CITIES:
     print("\n" + "=" * 60)
-    print(f"Procesando ciudad: {city}")
+    print(f"Processing city: {city}")
     print("=" * 60)
 
     input_file = BASE_DATA / city / INPUT_FILENAME
@@ -108,28 +108,28 @@ for city in CITIES:
 
     output_file = output_folder / "nearby_lockers_scored_report.csv"
 
-    print(f"Leyendo archivo: {input_file}")
+    print(f"Reading file: {input_file}")
 
     df = pd.read_csv(input_file)
     df = df.dropna(subset=["Latitude", "Longitude"]).reset_index(drop=True)
 
-    # Crear ID numérico si no existe
+    # Create a numeric ID if it does not exist
     if "ID" not in df.columns:
         df.insert(0, "ID", range(1, len(df) + 1))
 
-    print(f"Total puntos con coordenadas: {len(df)}")
+    print(f"Total points with coordinates: {len(df)}")
 
     if len(df) < 2:
-        print("No hay suficientes puntos para comparar.")
+        print("There are not enough points to compare.")
         continue
 
     coords_rad = np.radians(df[["Latitude", "Longitude"]].to_numpy())
     radius_rad = DISTANCE_THRESHOLD_METERS / EARTH_RADIUS_METERS
 
-    print("Construyendo índice espacial...")
+    print("Building spatial index...")
     tree = BallTree(coords_rad, metric="haversine")
 
-    print(f"Buscando pares a menos de {DISTANCE_THRESHOLD_METERS} metros...")
+    print(f"Searching for pairs within {DISTANCE_THRESHOLD_METERS} meters...")
 
     indices, distances = tree.query_radius(
         coords_rad,
@@ -140,7 +140,7 @@ for city in CITIES:
 
     results = []
 
-    for i in tqdm(range(len(df)), desc=f"Analizando pares {city}"):
+    for i in tqdm(range(len(df)), desc=f"Analyzing pairs {city}"):
         neighbors = indices[i]
         dists = distances[i]
 
@@ -209,7 +209,7 @@ for city in CITIES:
                 "Company_2": company_2,
             }
 
-            columnas_excluidas = {
+            excluded_columns = {
                 "ID",
                 "Latitude",
                 "Longitude",
@@ -218,7 +218,7 @@ for city in CITIES:
             }
 
             for col in df.columns:
-                if col in columnas_excluidas:
+                if col in excluded_columns:
                     continue
 
                 col_name = col.replace(" ", "_")
@@ -229,7 +229,7 @@ for city in CITIES:
 
     report = pd.DataFrame(results)
 
-    columnas_inicio = [
+    leading_columns = [
         "City",
         "Distance_m",
         "Duplicate_Score",
@@ -252,12 +252,12 @@ for city in CITIES:
     ]
 
     if len(report) > 0:
-        columnas_restantes = [
+        remaining_columns = [
             col for col in report.columns
-            if col not in columnas_inicio
+            if col not in leading_columns
         ]
 
-        report = report[columnas_inicio + columnas_restantes]
+        report = report[leading_columns + remaining_columns]
 
         report = report.sort_values(
             by=["Duplicate_Score", "Distance_m"],
@@ -266,15 +266,15 @@ for city in CITIES:
 
     report.to_csv(output_file, index=False, encoding="utf-8-sig")
 
-    print(f"\nReporte guardado en:")
+    print(f"\nReport saved to:")
     print(output_file)
-    print(f"\nTotal pares cercanos encontrados: {len(report)}")
+    print(f"\nTotal nearby pairs found: {len(report)}")
 
     if len(report) > 0:
-        print("\nResumen por clasificación:")
+        print("\nSummary by classification:")
         print(report["Classification"].value_counts())
 
-        print("\nTop 10 candidatos más sospechosos:")
+        print("\nTop 10 most suspicious candidates:")
         print(
             report[
                 [
@@ -291,6 +291,6 @@ for city in CITIES:
             ].head(10)
         )
     else:
-        print("No se encontraron pares cercanos.")
+        print("No nearby pairs were found.")
 
-print("\nProceso terminado.")
+print("\nProcess completed.")

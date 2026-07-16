@@ -16,7 +16,7 @@ for filename in FILES:
     input_file = INPUT_FOLDER / filename
     city_slug = filename.split(" ")[0].lower()
 
-    print(f"\nProcesando {filename}...")
+    print(f"\nProcessing {filename}...")
 
     with open(input_file, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -59,6 +59,6 @@ for filename in FILES:
 
     df.to_csv(output_file, index=False, encoding="utf-8-sig")
 
-    print(f"   ✓ CSV guardado en:")
+    print(f"   ✓ CSV saved to:")
     print(f"   {output_file}")
-    print(f"   Total oficinas: {len(df)}")
+    print(f"   Total offices: {len(df)}")
