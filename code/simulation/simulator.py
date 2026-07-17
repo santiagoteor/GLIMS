@@ -1,26 +1,36 @@
-from pathlib import Path
+import argparse
 import numpy as np
 import pandas as pd
-from code.common.paths import PROJECT_ROOT
+from code.common.paths import DATA_DIR, RESULTS_DIR
 np.random.seed(42)
 
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description="Run the GLIMS last-mile logistics simulation."
+    )
 
+    parser.add_argument(
+        "--city",
+        choices=["madrid", "barcelona", "valencia"],
+        default=None,
+        help="City to simulate. If omitted, all cities are simulated.",
+    )
+    parser.add_argument(
+        "--neighborhood",
+        default=None,
+        help="Neighborhood to simulate. If omitted, all neighborhoods are simulated.",
+    )
 
-BASE_DIR = PROJECT_ROOT
+    return parser.parse_args()
 
-ACTIVE_CITY = "madrid"      # "madrid", "barcelona", or "valencia"
-ACTIVE_NEIGHBORHOOD = "moratalaz"          # None = all neighborhoods / "moratalaz" = one neighborhood only
-
-DATA_FOLDER = BASE_DIR / "data"
-RESULTS_FOLDER = BASE_DIR / "results"
 
 def load_city_data(city: str):
-    city_folder = DATA_FOLDER / city
+    city_folder = DATA_DIR / city
 
     points = pd.read_csv(city_folder / "puntos_b2c.csv")
     centers = pd.read_csv(city_folder / "centros_cc.csv")
     boundaries = pd.read_csv(city_folder / "limites_barrios.csv")
-    parameters = pd.read_csv(DATA_FOLDER / "parametros_modelos.csv")
+    parameters = pd.read_csv(DATA_DIR / "parametros_modelos.csv")
 
     return points, centers, boundaries, parameters
 
@@ -337,29 +347,54 @@ def simulate_city(city: str, active_neighborhood: str | None = None):
 # =============================================================================
 
 if __name__ == "__main__":
+    args = parse_arguments()
 
-    RESULTS_FOLDER.mkdir(parents=True, exist_ok=True)
-
-    results_df = simulate_city(
-        city=ACTIVE_CITY,
-        active_neighborhood=ACTIVE_NEIGHBORHOOD,
+    cities = (
+        [args.city.lower()]
+        if args.city is not None
+        else ["madrid", "barcelona", "valencia"]
     )
 
-    if results_df.empty:
+    neighborhood = (
+        args.neighborhood.lower()
+        if args.neighborhood is not None
+        else None
+    )
+
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    all_results = []
+
+    for city in cities:
+        print(f"\n{'=' * 60}")
+        print(f"SIMULATING {city.upper()}")
+        print(f"{'=' * 60}")
+
+        city_results = simulate_city(
+            city=city,
+            active_neighborhood=neighborhood,
+        )
+
+        if not city_results.empty:
+            all_results.append(city_results)
+
+    if not all_results:
         print("\nNo results were generated.")
     else:
+        results_df = pd.concat(all_results, ignore_index=True)
         results_df = results_df.round(2)
 
         print("\nRESULTS")
         print(results_df.to_string(index=False))
 
-        output_filename = (
-            f"resultados_{ACTIVE_CITY}.csv"
-            if ACTIVE_NEIGHBORHOOD is None
-            else f"resultados_{ACTIVE_CITY}_{ACTIVE_NEIGHBORHOOD}.csv"
-        )
+        if len(cities) > 1:
+            output_filename = "resultados.csv"
+        elif neighborhood is None:
+            output_filename = f"resultados_{cities[0]}.csv"
+        else:
+            output_filename = f"resultados_{cities[0]}_{neighborhood}.csv"
 
-        output_path = RESULTS_FOLDER / output_filename
+        output_path = RESULTS_DIR / output_filename
 
         results_df.to_csv(
             output_path,
