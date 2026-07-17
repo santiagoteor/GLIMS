@@ -29,3 +29,8 @@ For distributor on foot
 - Search articles of last-mile delivery on foot to see how to convert those limits in operational capacity. 
 
 All of the previous ones are on the folder 'articles' in this project. 
+
+- Gruber, Kihm & Lenz (2014) use until 100 kg of weight, no package above 25 kg, and box until 176 liters (78×48×47 cm). 
+It is a reference with many citations because come from the german real project "Ich ersetze ein Auto" with 41 e-cargo bikes
+
+- Llorca y Moeckel asumen una capacidad de 20 paquetes por cargo bike eléctrica, mientras que Niels, Hof y Bogenberger asumen hasta 30 paquetes; y estudios de caso de Londres han impuesto la restricción de no más de 25 ítems por bici. En estudios de ciudades medianas se han modelado incluso escenarios con capacidades de carga de las e-cargo bikes entre 150 y 275 kg, pero eso ya son cargo bikes de 4 ruedas grandes. 

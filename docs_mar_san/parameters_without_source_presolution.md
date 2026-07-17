@@ -4,7 +4,6 @@
 - The preferred approach is to perform a literature review, as similar studies on last-mile logistics often report vehicle capacities or cite their original sources.
 - When a specific vehicle model is considered, manufacturer specifications should be used, as they provide the most reliable information regarding payload and package capacity.
 
-
 *CO₂ emission factors (diesel and electric vehicles)*
 - Emission factors should be obtained from official or widely accepted sources, such as the EMEP/EEA Emission Inventory Guidebook, national environmental agencies, or other recognized databases.
 - For electric vehicles, assuming 0 g CO₂/km is only valid under a Tank-to-Wheel (TTW) perspective, where no emissions occur during vehicle operation. If a Well-to-Wheel (WTW) or life-cycle perspective is adopted, the electricity generation mix should also be considered. Therefore, the selected assumption must be clearly stated and justified.
