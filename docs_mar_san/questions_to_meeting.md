@@ -10,7 +10,7 @@
 - Is it necessary the use of the 10 indicators mentioned in the technical documentation (205778_annex_2_-_descripcio_del_projecte_def -- pag. 3)? 
 - Where is the source for the .csv data used as raw data in the project (B2C, CC... )?
 - Have the notebook called "Barcelona" any actual use?
-- Is a good practise convert to numeric latitude and longitude data? (I am not a geographer lol)
+- Is a good practise convert to numeric latitude and longitude data? 
 - Use or pass information of parameters and similar variables to a .csv is a good practise? 
 - Only is used CO2 as pollulant? 
 - Can we take a model from amazon vehicles? 

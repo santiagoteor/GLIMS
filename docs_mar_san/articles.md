@@ -5,4 +5,3 @@
 - ISO 11228-1. Ergonomics — Manual Handling — Part 1: Lifting, Carrying and Lowering.
 - Waters, T. R., Putz-Anderson, V., Garg, A., & Fine, L. J. (1993). Revised NIOSH Equation for the Design and Evaluation of Manual Lifting Tasks.
 - European Agency for Safety and Health at Work (EU-OSHA). Work-Related Musculoskeletal Disorders: Manual Handling of Loads.
-- Search for literature on last-mile delivery on foot to identify how ergonomic load limits are translated into operational delivery capacity (e.g., number of parcels, maximum carried weight, or service constraints).
