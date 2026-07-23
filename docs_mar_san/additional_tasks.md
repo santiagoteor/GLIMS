@@ -3,5 +3,4 @@
     + 
 
 - To not use radial distance, it must be used other ways as bicycles or pedestrian paths, but it is not sure that OSMR have it, should be investigated. 
-- Read about EMEP/EEA, could be important to unresvolved parameters. 
-- 
+- Read about EMEP/EEA, could be important to unresvolved parameters.

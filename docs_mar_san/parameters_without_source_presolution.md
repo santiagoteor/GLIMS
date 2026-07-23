@@ -3,6 +3,7 @@
 *Vehicle capacities (cargo bike, van, pedestrian)*
 - The preferred approach is to perform a literature review, as similar studies on last-mile logistics often report vehicle capacities or cite their original sources.
 - When a specific vehicle model is considered, manufacturer specifications should be used, as they provide the most reliable information regarding payload and package capacity.
+- Could be better use an Anazon model for the van, bike and pedestrian could be more difficult
 
 *CO₂ emission factors (diesel and electric vehicles)*
 - Emission factors should be obtained from official or widely accepted sources, such as the EMEP/EEA Emission Inventory Guidebook, national environmental agencies, or other recognized databases.
@@ -18,3 +19,5 @@
 - A reasonable approach is to estimate them by decomposing the total cost into its main components, such as rental costs, operating expenses, labour costs, or service fees, using publicly available market data.
 - Another common practice is to adopt values reported in similar academic studies and clearly state them as scenario assumptions.
 - Whenever possible, these parameters should also be included in a sensitivity analysis to assess how strongly they influence the model's results.
+- One possible solution is using ~Observatorio de Costes del Transporte de Mercancías por Carretera (Ministerio de Transportes y Movilidad Sostenible)~ to the variable cost of the vehicle and 
+~Observatorio de Costes (partida "personal de conducción")~ to the variable cost of workers in a motor vehicle.  
