@@ -25,34 +25,49 @@ from code.simulation.simulator import (
     calculate_haversine,
 )
 
+from code.simulation.operational_points import (
+    OperationalPoint,
+    select_operational_point,
+)
+
+
 OSRM_HOST = "http://localhost:5000"
 OSRM_PROFILE = "driving"
 
 BASE_DIR = PROJECT_ROOT
 
 ACTIVE_CITY = "madrid"              # "madrid", "barcelona", or "valencia"
-ACTIVE_NEIGHBORHOOD = "Moratalaz"   # None = all neighborhoods / "Moratalaz" = one neighborhood only
+ACTIVE_NEIGHBORHOOD = "El Pardo"   # None = all neighborhoods / "Moratalaz" = one neighborhood only
 RESULTS_FOLDER = BASE_DIR / "results"
 
 
 def check_osrm_server(host: str = OSRM_HOST, profile: str = OSRM_PROFILE):
     """
-    Fail fast with a clear message if no OSRM server is reachable,
-    instead of letting every subsequent request time out one by one.
+    Fail fast with a clear message if no OSRM server is reachable.
     """
 
-    probe_url = f"{host}/table/v1/{profile}/13.388860,52.517037;13.397634,52.529407"
+    probe_url = (
+        f"{host}/table/v1/{profile}/"
+        "-3.703790,40.416775;-3.693790,40.426775"
+    )
 
     try:
         response = requests.get(probe_url, timeout=5)
         response.raise_for_status()
+        payload = response.json()
 
     except requests.exceptions.RequestException as exc:
         raise RuntimeError(
             f"Could not reach OSRM server at {host}. "
-            "Make sure osrm-routed is running (see module docstring for setup). "
+            "Make sure osrm-routed is running. "
             f"Original error: {exc}"
         ) from exc
+
+    if payload.get("code") != "Ok":
+        raise RuntimeError(
+            "OSRM server responded, but the test route failed: "
+            f"{payload.get('code')} - {payload.get('message', '')}"
+        )
 
 
 def _format_coords(coords):
@@ -91,45 +106,59 @@ def osrm_table(coords, sources=None, destinations=None, host=OSRM_HOST, profile=
 
 def select_logistics_center(
     centers: pd.DataFrame,
-    neighborhood_lat: float,
-    neighborhood_lon: float,
+    last_mile_lat: float,
+    last_mile_lon: float,
 ):
     """
-    Select the logistics center closest to the neighborhood centroid
-    using real driving distances from OSRM.
+    Select the logistics center with the shortest bidirectional trunk route.
+
+    Coordinate index 0 is the last-mile point. Indices 1..n are the
+    logistics centers, so one OSRM table request provides both directions.
     """
 
     centers = centers.copy()
 
-    coords = [(neighborhood_lon, neighborhood_lat)] + list(
+    coords = [(last_mile_lon, last_mile_lat)] + list(
         zip(centers["Longitude"], centers["Latitude"])
     )
 
-    n_centers = len(centers)
+    distance_matrix = osrm_table(coords)
+    center_indices = np.arange(1, len(centers) + 1)
 
-    distances_km = osrm_table(
-        coords,
-        sources=[0],
-        destinations=list(range(1, n_centers + 1)),
-    )[0]
+    centers["distancia_troncal_ida_km"] = distance_matrix[center_indices, 0]
+    centers["distancia_troncal_regreso_km"] = distance_matrix[0, center_indices]
+    centers["distancia_troncal_total_km"] = (
+        centers["distancia_troncal_ida_km"]
+        + centers["distancia_troncal_regreso_km"]
+    )
 
-    centers["distancia_km"] = distances_km
+    reachable_centers = centers[
+        np.isfinite(centers["distancia_troncal_total_km"])
+    ]
 
-    return centers.loc[centers["distancia_km"].idxmin()]
+    if reachable_centers.empty:
+        raise RuntimeError(
+            "OSRM could not find a bidirectional route between any logistics "
+            "center and the last-mile point."
+        )
+
+    return reachable_centers.loc[
+        reachable_centers["distancia_troncal_total_km"].idxmin()
+    ]
 
 
 def get_neighborhood_matrix(
-    centroid_lat: float,
-    centroid_lon: float,
+    last_mile_lat: float,
+    last_mile_lon: float,
     neighborhood_points: pd.DataFrame,
 ):
     """
-    Build the full distance matrix (centroid + clients) for the neighborhood
-    in a single OSRM /table call. Index 0 is the centroid; indices 1..n
+    Build the full distance matrix (last-mile point + clients) for the
+    neighborhood in a single OSRM /table call. Index 0 is the last-mile point; indices 1..n
     follow the row order of neighborhood_points.
     """
 
-    coords = [(centroid_lon, centroid_lat)] + list(
+    coords = [(last_mile_lon, last_mile_lat)] + list(
         zip(neighborhood_points["Longitude"], neighborhood_points["Latitude"])
     )
 
@@ -161,217 +190,350 @@ def nearest_neighbor_tsp(matrix, n_clients: int):
 def calculate_radial_distance(matrix, n_clients: int):
     return sum(matrix[0, i] for i in range(1, n_clients + 1)) * 2
 
+def calculate_haversine_radial_distance(
+    last_mile_lat: float,
+    last_mile_lon: float,
+    neighborhood_points: pd.DataFrame,
+):
+    one_way_km = sum(
+        calculate_haversine(
+            last_mile_lat,
+            last_mile_lon,
+            point["Latitude"],
+            point["Longitude"],
+        )
+        for _, point in neighborhood_points.iterrows()
+    )
+
+    return one_way_km * 2
+
+
+def _build_result(
+    *,
+    city: str,
+    neighborhood_name: str,
+    model_name: str,
+    selected_cc: pd.Series,
+    package_count: int,
+    outbound_trunk_distance: float,
+    return_trunk_distance: float,
+    total_km: float,
+    trip_count: int,
+    co2_kg: float,
+    total_cost: float,
+):
+    """Build a result row using the common output schema."""
+
+    return {
+        "ciudad": city,
+        "barrio": neighborhood_name,
+        "modelo": model_name,
+        "centro_logistico": selected_cc["Location"],
+        "paquetes": package_count,
+        "distancia_troncal_ida_km": outbound_trunk_distance,
+        "distancia_troncal_regreso_km": return_trunk_distance,
+        "km_recorridos": total_km,
+        "numero_viajes": trip_count,
+        "emisiones_co2_kg": co2_kg,
+        "costo_total_eur": total_cost,
+    }
+
+
+def simulate_m1(
+    *,
+    city: str,
+    neighborhood_name: str,
+    selected_cc: pd.Series,
+    package_count: int,
+    outbound_trunk_distance: float,
+    return_trunk_distance: float,
+    round_trip_trunk_distance: float,
+    internal_km: float,
+    parameters: dict,
+):
+    """Simulate conventional-van home delivery from the logistics center."""
+
+    model = parameters["FURGONETA_CONV"]
+    trip_count = int(np.ceil(package_count / model["capacidad"]))
+    total_km = round_trip_trunk_distance * trip_count + internal_km
+    total_cost = (
+        total_km * model["costo_km"]
+        + (total_km / model["v_media"]) * model["costo_hora"]
+    )
+    co2_kg = (total_km * model["co2_km"]) / 1000
+
+    return _build_result(
+        city=city,
+        neighborhood_name=neighborhood_name,
+        model_name="M1: Furgoneta Combustión desde CC",
+        selected_cc=selected_cc,
+        package_count=package_count,
+        outbound_trunk_distance=outbound_trunk_distance,
+        return_trunk_distance=return_trunk_distance,
+        total_km=total_km,
+        trip_count=trip_count,
+        co2_kg=co2_kg,
+        total_cost=total_cost,
+    )
+
+
+def simulate_m2(
+    *,
+    city: str,
+    neighborhood_name: str,
+    selected_cc: pd.Series,
+    package_count: int,
+    outbound_trunk_distance: float,
+    return_trunk_distance: float,
+    round_trip_trunk_distance: float,
+    internal_km: float,
+    parameters: dict,
+):
+    """Simulate electric-van home delivery from the logistics center."""
+
+    model = parameters["FURGONETA_ELEC"]
+    trip_count = int(np.ceil(package_count / model["capacidad"]))
+    total_km = round_trip_trunk_distance * trip_count + internal_km
+    total_cost = (
+        total_km * model["costo_km"]
+        + (total_km / model["v_media"]) * model["costo_hora"]
+    )
+
+    return _build_result(
+        city=city,
+        neighborhood_name=neighborhood_name,
+        model_name="M2: Furgoneta Eléctrica desde CC",
+        selected_cc=selected_cc,
+        package_count=package_count,
+        outbound_trunk_distance=outbound_trunk_distance,
+        return_trunk_distance=return_trunk_distance,
+        total_km=total_km,
+        trip_count=trip_count,
+        co2_kg=0.0,
+        total_cost=total_cost,
+    )
+
+
+def _calculate_hub_supply_metrics(
+    round_trip_trunk_distance: float,
+    parameters: dict,
+):
+    """Calculate conventional-van supply distance, cost, and emissions."""
+
+    van = parameters["FURGONETA_CONV"]
+    supply_cost = round_trip_trunk_distance * van["costo_km"]
+    supply_co2 = (round_trip_trunk_distance * van["co2_km"]) / 1000
+
+    return round_trip_trunk_distance, supply_cost, supply_co2
+
+
+def simulate_m3(
+    *,
+    city: str,
+    neighborhood_name: str,
+    selected_cc: pd.Series,
+    package_count: int,
+    outbound_trunk_distance: float,
+    return_trunk_distance: float,
+    round_trip_trunk_distance: float,
+    internal_km: float,
+    parameters: dict,
+):
+    """Simulate logistics-center supply plus cargo-bike delivery."""
+
+    model = parameters["BICICLETA_CARGO"]
+    bike_trip_count = int(np.ceil(package_count / model["capacidad"]))
+    supply_km, supply_cost, supply_co2 = _calculate_hub_supply_metrics(
+        round_trip_trunk_distance,
+        parameters,
+    )
+
+    internal_bike_km = internal_km * 1.15
+    bike_cost = (
+        internal_bike_km * model["costo_km"]
+        + (internal_bike_km / model["v_media"]) * model["costo_hora"]
+    )
+
+    return _build_result(
+        city=city,
+        neighborhood_name=neighborhood_name,
+        model_name="M3: CC -> Microhub -> Bicicleta",
+        selected_cc=selected_cc,
+        package_count=package_count,
+        outbound_trunk_distance=outbound_trunk_distance,
+        return_trunk_distance=return_trunk_distance,
+        total_km=supply_km + internal_bike_km,
+        trip_count=1 + bike_trip_count,
+        co2_kg=supply_co2,
+        total_cost=supply_cost + bike_cost + model["fijo_hub_dia"],
+    )
+
+
+def simulate_m4(
+    *,
+    city: str,
+    neighborhood_name: str,
+    selected_cc: pd.Series,
+    package_count: int,
+    outbound_trunk_distance: float,
+    return_trunk_distance: float,
+    round_trip_trunk_distance: float,
+    courier_walking_km: float,
+    parameters: dict,
+):
+    """Simulate PUDO supply plus courier delivery on foot."""
+
+    model = parameters["PUDO_A_PIE"]
+    walking_trip_count = int(np.ceil(package_count / model["capacidad"]))
+    supply_km, supply_cost, supply_co2 = _calculate_hub_supply_metrics(
+        round_trip_trunk_distance,
+        parameters,
+    )
+    walking_cost = (
+        courier_walking_km / model["v_media"]
+    ) * model["costo_hora"]
+
+    return _build_result(
+        city=city,
+        neighborhood_name=neighborhood_name,
+        model_name="M4: CC -> PUDO -> Entrega a pie",
+        selected_cc=selected_cc,
+        package_count=package_count,
+        outbound_trunk_distance=outbound_trunk_distance,
+        return_trunk_distance=return_trunk_distance,
+        total_km=supply_km + courier_walking_km,
+        trip_count=1 + walking_trip_count,
+        co2_kg=supply_co2,
+        total_cost=(
+            supply_cost
+            + walking_cost
+            + package_count * model["comision_pudo"]
+        ),
+    )
+
+
+def simulate_m5(
+    *,
+    city: str,
+    neighborhood_name: str,
+    selected_cc: pd.Series,
+    package_count: int,
+    outbound_trunk_distance: float,
+    return_trunk_distance: float,
+    round_trip_trunk_distance: float,
+    customer_travel_km: float,
+    parameters: dict,
+):
+    """Simulate PUDO supply plus customer collection travel."""
+
+    model = parameters["PUDO_CONSUMIDOR"]
+    supply_km, supply_cost, supply_co2 = _calculate_hub_supply_metrics(
+        round_trip_trunk_distance,
+        parameters,
+    )
+    customer_co2 = (
+        customer_travel_km * model["co2_km_estimado_cliente"]
+    ) / 1000
+
+    return _build_result(
+        city=city,
+        neighborhood_name=neighborhood_name,
+        model_name="M5: CC -> PUDO -> Recogida Cliente",
+        selected_cc=selected_cc,
+        package_count=package_count,
+        outbound_trunk_distance=outbound_trunk_distance,
+        return_trunk_distance=return_trunk_distance,
+        total_km=supply_km + customer_travel_km,
+        trip_count=1 + package_count,
+        co2_kg=supply_co2 + customer_co2,
+        total_cost=supply_cost + package_count * model["comision_pudo"],
+    )
+
 
 def simulate_neighborhood(
     city: str,
     neighborhood_name: str,
     neighborhood_points: pd.DataFrame,
+    last_mile_point: OperationalPoint,
     centers: pd.DataFrame,
     parameters: dict,
 ):
+    """Prepare shared route metrics and run all five logistics models."""
 
     package_count = len(neighborhood_points)
 
     if package_count == 0:
         return []
 
-    # --------------------------------------------------
-    # Neighborhood preparation
-    # --------------------------------------------------
+    last_mile_lat = last_mile_point.latitude
+    last_mile_lon = last_mile_point.longitude
 
-    centroid_lat = neighborhood_points["Latitude"].mean()
-    centroid_lon = neighborhood_points["Longitude"].mean()
-
-    print("Centroid:", centroid_lat, centroid_lon)
-
-    # --------------------------------------------------
-    # Logistics center selection + trunk distance
-    # --------------------------------------------------
+    print(
+        f"Last-mile point: {last_mile_point.name} "
+        f"({last_mile_lat}, {last_mile_lon})"
+    )
 
     selected_cc = select_logistics_center(
         centers,
-        centroid_lat,
-        centroid_lon,
+        last_mile_lat,
+        last_mile_lon,
     )
 
-    trunk_distance = selected_cc["distancia_km"]
+    outbound_trunk_distance = selected_cc["distancia_troncal_ida_km"]
+    return_trunk_distance = selected_cc["distancia_troncal_regreso_km"]
+    round_trip_trunk_distance = selected_cc["distancia_troncal_total_km"]
 
     print(f"Selected logistics center: {selected_cc['Location']}")
-    print(f"Road distance from CC to neighborhood (OSRM): {trunk_distance:.2f} km")
-
-    # --------------------------------------------------
-    # Distance matrix construction
-    # --------------------------------------------------
+    print(f"CC -> neighborhood: {outbound_trunk_distance:.2f} km")
+    print(f"Neighborhood -> CC: {return_trunk_distance:.2f} km")
+    print(f"Round-trip trunk distance: {round_trip_trunk_distance:.2f} km")
 
     drive_matrix = get_neighborhood_matrix(
-        centroid_lat,
-        centroid_lon,
+        last_mile_lat,
+        last_mile_lon,
         neighborhood_points,
     )
 
-    # --------------------------------------------------
-    # Internal kilometers (TSP) + radial distance (PUDO/walking)
-    # --------------------------------------------------
-
     internal_km = nearest_neighbor_tsp(drive_matrix, package_count)
-    courier_walking_km = calculate_radial_distance(drive_matrix, package_count)
+    radial_km = calculate_haversine_radial_distance(
+        last_mile_lat,
+        last_mile_lon,
+        neighborhood_points,
+    )
 
-    first_point = neighborhood_points.iloc[0]
+    shared_arguments = {
+        "city": city,
+        "neighborhood_name": neighborhood_name,
+        "selected_cc": selected_cc,
+        "package_count": package_count,
+        "outbound_trunk_distance": outbound_trunk_distance,
+        "return_trunk_distance": return_trunk_distance,
+        "round_trip_trunk_distance": round_trip_trunk_distance,
+        "parameters": parameters,
+    }
 
-    print(
-        "OSRM:", drive_matrix[0, 1],
-        "HAV:", calculate_haversine(
-            centroid_lat, centroid_lon,
-            first_point["Latitude"], first_point["Longitude"],
+    return [
+        simulate_m1(
+            **shared_arguments,
+            internal_km=internal_km,
         ),
-    )
-
-    results = []
-
-    # ==================================================
-    # M1
-    # ==================================================
-
-    m1 = parameters["FURGONETA_CONV"]
-
-    trips_1 = int(np.ceil(package_count / m1["capacidad"]))
-
-    total_km_1 = trunk_distance * 2 * trips_1 + internal_km
-
-    cost_1 = (
-        total_km_1 * m1["costo_km"]
-        + (total_km_1 / m1["v_media"]) * m1["costo_hora"]
-    )
-
-    co2_1 = (total_km_1 * m1["co2_km"]) / 1000
-
-    results.append({
-        "ciudad": city,
-        "barrio": neighborhood_name,
-        "modelo": "M1: Furgoneta Combustión desde CC",
-        "centro_logistico": selected_cc["Location"],
-        "paquetes": package_count,
-        "distancia_troncal_km": trunk_distance,
-        "km_recorridos": total_km_1,
-        "numero_viajes": trips_1,
-        "emisiones_co2_kg": co2_1,
-        "costo_total_eur": cost_1,
-    })
-
-    # ==================================================
-    # M2
-    # ==================================================
-
-    m2 = parameters["FURGONETA_ELEC"]
-
-    trips_2 = int(np.ceil(package_count / m2["capacidad"]))
-
-    total_km_2 = trunk_distance * 2 * trips_2 + internal_km
-
-    cost_2 = (
-        total_km_2 * m2["costo_km"]
-        + (total_km_2 / m2["v_media"]) * m2["costo_hora"]
-    )
-
-    results.append({
-        "ciudad": city,
-        "barrio": neighborhood_name,
-        "modelo": "M2: Furgoneta Eléctrica desde CC",
-        "centro_logistico": selected_cc["Location"],
-        "paquetes": package_count,
-        "distancia_troncal_km": trunk_distance,
-        "km_recorridos": total_km_2,
-        "numero_viajes": trips_2,
-        "emisiones_co2_kg": 0.0,
-        "costo_total_eur": cost_2,
-    })
-
-    # ==================================================
-    # M3
-    # ==================================================
-
-    m3 = parameters["BICICLETA_CARGO"]
-
-    bike_trips = int(np.ceil(package_count / m3["capacidad"]))
-
-    hub_supply_km = trunk_distance * 2
-
-    hub_truck_cost = hub_supply_km * parameters["FURGONETA_CONV"]["costo_km"]
-    hub_truck_co2 = (hub_supply_km * parameters["FURGONETA_CONV"]["co2_km"]) / 1000
-
-    internal_bike_km = internal_km * 1.15
-
-    bike_cost = (
-        internal_bike_km * m3["costo_km"]
-        + (internal_bike_km / m3["v_media"]) * m3["costo_hora"]
-    )
-
-    results.append({
-        "ciudad": city,
-        "barrio": neighborhood_name,
-        "modelo": "M3: CC -> Microhub -> Bicicleta",
-        "centro_logistico": selected_cc["Location"],
-        "paquetes": package_count,
-        "distancia_troncal_km": trunk_distance,
-        "km_recorridos": hub_supply_km + internal_bike_km,
-        "numero_viajes": 1 + bike_trips,
-        "emisiones_co2_kg": hub_truck_co2,
-        "costo_total_eur": hub_truck_cost + bike_cost + m3["fijo_hub_dia"],
-    })
-
-    # ==================================================
-    # M4
-    # ==================================================
-
-    m4 = parameters["PUDO_A_PIE"]
-
-    walking_trips = int(np.ceil(package_count / m4["capacidad"]))
-
-    walking_cost = (courier_walking_km / m4["v_media"]) * m4["costo_hora"]
-
-    results.append({
-        "ciudad": city,
-        "barrio": neighborhood_name,
-        "modelo": "M4: CC -> PUDO -> Entrega a pie",
-        "centro_logistico": selected_cc["Location"],
-        "paquetes": package_count,
-        "distancia_troncal_km": trunk_distance,
-        "km_recorridos": hub_supply_km + courier_walking_km,
-        "numero_viajes": 1 + walking_trips,
-        "emisiones_co2_kg": hub_truck_co2,
-        "costo_total_eur": (
-            hub_truck_cost
-            + walking_cost
-            + package_count * m4["comision_pudo"]
+        simulate_m2(
+            **shared_arguments,
+            internal_km=internal_km,
         ),
-    })
-
-    # ==================================================
-    # M5
-    # ==================================================
-
-    m5 = parameters["PUDO_CONSUMIDOR"]
-
-    customer_co2 = (courier_walking_km * m5["co2_km_estimado_cliente"]) / 1000
-
-    results.append({
-        "ciudad": city,
-        "barrio": neighborhood_name,
-        "modelo": "M5: CC -> PUDO -> Recogida Cliente",
-        "centro_logistico": selected_cc["Location"],
-        "paquetes": package_count,
-        "distancia_troncal_km": trunk_distance,
-        "km_recorridos": hub_supply_km + courier_walking_km,
-        "numero_viajes": 1 + package_count,
-        "emisiones_co2_kg": hub_truck_co2 + customer_co2,
-        "costo_total_eur": (
-            hub_truck_cost
-            + package_count * m5["comision_pudo"]
+        simulate_m3(
+            **shared_arguments,
+            internal_km=internal_km,
         ),
-    })
-
-    return results
-
+        simulate_m4(
+            **shared_arguments,
+            courier_walking_km=radial_km,
+        ),
+        simulate_m5(
+            **shared_arguments,
+            customer_travel_km=radial_km,
+        ),
+    ]
 
 def simulate_city(
     city: str,
@@ -405,11 +567,17 @@ def simulate_city(
         if neighborhood_points.empty:
             print(f"⚠️ There are no points within the boundaries of {neighborhood_name}.")
             continue
+        
+        last_mile_point = select_operational_point(
+            strategy="centroid",
+            neighborhood_records=neighborhood_points,
+        )
 
         results = simulate_neighborhood(
             city=city,
             neighborhood_name=neighborhood_name,
             neighborhood_points=neighborhood_points,
+            last_mile_point=last_mile_point,
             centers=centers,
             parameters=parameters,
         )

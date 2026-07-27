@@ -59,7 +59,7 @@ ox.settings.use_cache = True
 BASE_DIR = PROJECT_ROOT
 
 ACTIVE_CITY = "madrid"      # "madrid", "barcelona", or "valencia"
-ACTIVE_NEIGHBORHOOD = "Moratalaz"          # None = all neighborhoods / "Moratalaz" = one neighborhood only
+ACTIVE_NEIGHBORHOOD = None          # None = all neighborhoods / "Moratalaz" = one neighborhood only
 DATA_FOLDER = BASE_DIR / "data"
 RESULTS_FOLDER = BASE_DIR / "results"
 
@@ -176,32 +176,67 @@ def prepare_neighborhood(
 def select_logistics_center(
     centers: pd.DataFrame,
     centroid_node: int,
-    G_drive
+    G_drive,
 ):
     """
-    Select the logistics center closest to the neighborhood centroid
-    using the road network.
+    Select the logistics center with valid routes in both directions:
+
+    logistics center -> neighborhood centroid
+    neighborhood centroid -> logistics center
+
+    The selected center minimizes the complete round-trip distance.
     """
 
-    # Distances from the centroid to the entire network
-    distances = nx.single_source_dijkstra_path_length(
+    # Distances from each logistics center to the centroid.
+    # Running Dijkstra from the centroid on the reversed graph is
+    # equivalent to calculating center -> centroid on the original graph.
+    reversed_graph = G_drive.reverse(copy=False)
+
+    outbound_distances = nx.single_source_dijkstra_path_length(
+        reversed_graph,
+        centroid_node,
+        weight="length",
+    )
+
+    # Distances from the centroid to each logistics center
+    # on the original directed graph.
+    return_distances = nx.single_source_dijkstra_path_length(
         G_drive,
         centroid_node,
-        weight="length"
+        weight="length",
     )
 
     centers = centers.copy()
 
-    centers["distancia_km"] = centers["node_drive"].apply(
-        lambda node: distances.get(node, np.inf) / 1000
+    centers["distancia_ida_km"] = centers["node_drive"].apply(
+        lambda node: outbound_distances.get(node, np.inf) / 1000
     )
 
-    selected_center = centers.loc[
-        centers["distancia_km"].idxmin()
+    centers["distancia_regreso_km"] = centers["node_drive"].apply(
+        lambda node: return_distances.get(node, np.inf) / 1000
+    )
+
+    centers["distancia_total_km"] = (
+        centers["distancia_ida_km"]
+        + centers["distancia_regreso_km"]
+    )
+
+    reachable_centers = centers[
+        np.isfinite(centers["distancia_ida_km"])
+        & np.isfinite(centers["distancia_regreso_km"])
+    ].copy()
+
+    if reachable_centers.empty:
+        raise nx.NetworkXNoPath(
+            "No logistics center has valid driving routes "
+            "to and from the neighborhood centroid."
+        )
+
+    selected_center = reachable_centers.loc[
+        reachable_centers["distancia_total_km"].idxmin()
     ]
 
     return selected_center
-
 # PROBLEM: The current implementation constructs a dense distance matrix by running Dijkstra's algorithm for each node in the subgraph. 
 # This approach does not scale well, especially when dealing with multiple neighborhoods across different cities. Additionally, much of the computed data is only used for the Traveling Salesman Problem (TSP), 
 # while the radial distance calculation only requires the row corresponding to the centroid.
@@ -377,7 +412,6 @@ def simulate_neighborhood(
     centers: pd.DataFrame,
     parameters: dict,
     G_drive,
-    neighborhood: pd.Series,
 ):
 
     package_count = len(neighborhood_points)
@@ -419,14 +453,33 @@ def simulate_neighborhood(
         neighborhood_info["centro_drive"],
         G_drive
     )
+    print("\nConnectivity to each logistics center:")
+
+    for _, center in centers.iterrows():
+
+        print(f"\n{center['Location']}")
+
+        print(
+            "CC -> barrio:",
+            nx.has_path(
+                G_drive,
+                center["node_drive"],
+                neighborhood_info["centro_drive"],
+            ),
+        )
+
+        print(
+            "Barrio -> CC:",
+            nx.has_path(
+                G_drive,
+                neighborhood_info["centro_drive"],
+                center["node_drive"],
+            ),
+        )
+    
 
     # PROBLEM: truncate_graph_bbox and nearest_nodes changed their signatures between OSMnx 1.x and 2.x; without a pinned version, the code may break.
     # TODO: Ensure a reproducible environment with pinned dependencies to avoid compatibility issues with OSMnx updates.
-
-    neighborhood_graph = build_neighborhood_subgraph(
-        G_drive,
-        neighborhood    
-    )
 
     print(
         f"Selected logistics center: "
@@ -438,7 +491,7 @@ def simulate_neighborhood(
 
     drive_matrix, node_map = get_neighborhood_matrices(
         neighborhood_info,
-        neighborhood_graph
+        G_drive,
     )
 
     # --------------------------------------------------
@@ -451,7 +504,7 @@ def simulate_neighborhood(
     #     matriz_drive
     # )
 
-    trunk_distance = (
+    outbound_trunk_distance = (
         nx.astar_path_length(
             G_drive,
             selected_cc["node_drive"],
@@ -461,15 +514,40 @@ def simulate_neighborhood(
                 G_drive.nodes[u]["x"],
                 G_drive.nodes[v]["y"],
                 G_drive.nodes[v]["x"],
-            ) * 1000,   # metros
+            ) * 1000,
             weight="length",
         )
         / 1000
     )
 
+    return_trunk_distance = (
+        nx.astar_path_length(
+            G_drive,
+            neighborhood_info["centro_drive"],
+            selected_cc["node_drive"],
+            heuristic=lambda u, v: calculate_haversine(
+                G_drive.nodes[u]["y"],
+                G_drive.nodes[u]["x"],
+                G_drive.nodes[v]["y"],
+                G_drive.nodes[v]["x"],
+            ) * 1000,
+            weight="length",
+        )
+        / 1000
+    )
+
+    round_trip_trunk_distance = (
+        outbound_trunk_distance + return_trunk_distance
+    )
+
     print(
-        f"Road distance from CC to neighborhood: "
-        f"{trunk_distance:.2f} km"
+        f"Road distance CC -> neighborhood: "
+        f"{outbound_trunk_distance:.2f} km"
+    )
+
+    print(
+        f"Road distance neighborhood -> CC: "
+        f"{return_trunk_distance:.2f} km"
     )
 
     # --------------------------------------------------
@@ -517,7 +595,7 @@ def simulate_neighborhood(
     trips_1 = int(np.ceil(package_count / m1["capacidad"]))
 
     total_km_1 = (
-        trunk_distance * 2 * trips_1
+        round_trip_trunk_distance * trips_1
         + internal_km
     )
 
@@ -536,7 +614,8 @@ def simulate_neighborhood(
         "modelo": "M1: Furgoneta Combustión desde CC",
         "centro_logistico": selected_cc["Location"],
         "paquetes": package_count,
-        "distancia_troncal_km": trunk_distance,
+        "distancia_troncal_ida_km": outbound_trunk_distance,
+        "distancia_troncal_regreso_km": return_trunk_distance,
         "km_recorridos": total_km_1,
         "numero_viajes": trips_1,
         "emisiones_co2_kg": co2_1,
@@ -552,7 +631,7 @@ def simulate_neighborhood(
     trips_2 = int(np.ceil(package_count / m2["capacidad"]))
 
     total_km_2 = (
-        trunk_distance * 2 * trips_2
+        round_trip_trunk_distance * trips_2
         + internal_km
     )
 
@@ -567,7 +646,8 @@ def simulate_neighborhood(
         "modelo": "M2: Furgoneta Eléctrica desde CC",
         "centro_logistico": selected_cc["Location"],
         "paquetes": package_count,
-        "distancia_troncal_km": trunk_distance,
+        "distancia_troncal_ida_km": outbound_trunk_distance,
+        "distancia_troncal_regreso_km": return_trunk_distance,
         "km_recorridos": total_km_2,
         "numero_viajes": trips_2,
         "emisiones_co2_kg": 0.0,
@@ -582,7 +662,7 @@ def simulate_neighborhood(
 
     bike_trips = int(np.ceil(package_count / m3["capacidad"]))
 
-    hub_supply_km = trunk_distance * 2
+    hub_supply_km = round_trip_trunk_distance
 
     # PROBLEM: The code currently uses the parameters of "FURGONETA_CONV" (conventional van) for the trunk leg from the CC to the hub in models M3, M4, and M5. 
     # However, according to the project specifications, this trunk leg should use the parameters of "FURGONETA_ELEC" (electric van) for sustainable scenarios. This discrepancy leads to inflated emissions and costs in the green scenarios.
@@ -616,7 +696,8 @@ def simulate_neighborhood(
         "modelo": "M3: CC -> Microhub -> Bicicleta",
         "centro_logistico": selected_cc["Location"],
         "paquetes": package_count,
-        "distancia_troncal_km": trunk_distance,
+        "distancia_troncal_ida_km": outbound_trunk_distance,
+        "distancia_troncal_regreso_km": return_trunk_distance,
         "km_recorridos": hub_supply_km + internal_bike_km,
         "numero_viajes": 1 + bike_trips,
         "emisiones_co2_kg": hub_truck_co2,
@@ -641,7 +722,8 @@ def simulate_neighborhood(
         "modelo": "M4: CC -> PUDO -> Entrega a pie",
         "centro_logistico": selected_cc["Location"],
         "paquetes": package_count,
-        "distancia_troncal_km": trunk_distance,
+        "distancia_troncal_ida_km": outbound_trunk_distance,
+        "distancia_troncal_regreso_km": return_trunk_distance,
         "km_recorridos": hub_supply_km + courier_walking_km,
         "numero_viajes": 1 + walking_trips,
         "emisiones_co2_kg": hub_truck_co2,
@@ -688,7 +770,8 @@ def simulate_neighborhood(
         "modelo": "M5: CC -> PUDO -> Recogida Cliente",
         "centro_logistico": selected_cc["Location"],
         "paquetes": package_count,
-        "distancia_troncal_km": trunk_distance,
+        "distancia_troncal_ida_km": outbound_trunk_distance,
+        "distancia_troncal_regreso_km": return_trunk_distance,
         "km_recorridos": hub_supply_km + courier_walking_km,
         "numero_viajes": 1 + package_count,
         "emisiones_co2_kg": hub_truck_co2 + customer_co2,
@@ -737,6 +820,26 @@ def simulate_city(
         centers,
         G_drive
     )
+    print(centers[["Location", "node_drive"]])
+    
+    for _, center in centers.iterrows():
+
+        node = center["node_drive"]
+
+        node_y = G_drive.nodes[node]["y"]
+        node_x = G_drive.nodes[node]["x"]
+
+        separation = calculate_haversine(
+            center["Latitude"],
+            center["Longitude"],
+            node_y,
+            node_x,
+        )
+
+        print(
+            center["Location"],
+            f"{separation*1000:.1f} m"
+        )
 
     print(f"Clients matched to the network: {len(points)}")
     print(f"Logistics centers matched: {len(centers)}")
@@ -787,7 +890,6 @@ def simulate_city(
             neighborhood_name=neighborhood_name,
             neighborhood_points=neighborhood_points,
             centers=centers,
-            neighborhood=neighborhood,
             parameters=parameters,
             G_drive=G_drive
         )

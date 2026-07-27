@@ -1,0 +1,16 @@
+﻿ciudad,barrio,modelo,centro_logistico,paquetes,distancia_troncal_ida_km,distancia_troncal_regreso_km,km_recorridos,numero_viajes,emisiones_co2_kg,costo_total_eur
+madrid,Lavapiés,M1: Furgoneta Combustión desde CC,Amazon Logistics DMA3,75,11.37,11.07,58.89,2,12.95,74.68
+madrid,Lavapiés,M2: Furgoneta Eléctrica desde CC,Amazon Logistics DMA3,75,11.37,11.07,58.89,2,0.0,64.77
+madrid,Lavapiés,M3: CC -> Microhub -> Bicicleta,Amazon Logistics DMA3,75,11.37,11.07,38.55,5,4.94,72.01
+madrid,Lavapiés,M4: CC -> PUDO -> Entrega a pie,Amazon Logistics DMA3,75,11.37,11.07,141.76,8,4.94,365.78
+madrid,Lavapiés,M5: CC -> PUDO -> Recogida Cliente,Amazon Logistics DMA3,75,11.37,11.07,141.76,76,7.92,47.6
+madrid,Moratalaz,M1: Furgoneta Combustión desde CC,Amazon Logistics DMA3,72,5.47,5.26,37.36,2,8.22,47.38
+madrid,Moratalaz,M2: Furgoneta Eléctrica desde CC,Amazon Logistics DMA3,72,5.47,5.26,37.36,2,0.0,41.1
+madrid,Moratalaz,M3: CC -> Microhub -> Bicicleta,Amazon Logistics DMA3,72,5.47,5.26,29.02,5,2.36,69.03
+madrid,Moratalaz,M4: CC -> PUDO -> Entrega a pie,Amazon Logistics DMA3,72,5.47,5.26,145.28,7,2.36,399.63
+madrid,Moratalaz,M5: CC -> PUDO -> Recogida Cliente,Amazon Logistics DMA3,72,5.47,5.26,145.28,73,5.72,40.83
+madrid,El Pardo,M1: Furgoneta Combustión desde CC,Amazon Logistics DMA3,16,24.57,24.12,50.05,1,11.01,63.47
+madrid,El Pardo,M2: Furgoneta Eléctrica desde CC,Amazon Logistics DMA3,16,24.57,24.12,50.05,1,0.0,55.05
+madrid,El Pardo,M3: CC -> Microhub -> Bicicleta,Amazon Logistics DMA3,16,24.57,24.12,50.25,2,10.71,68.55
+madrid,El Pardo,M4: CC -> PUDO -> Entrega a pie,Amazon Logistics DMA3,16,24.57,24.12,55.4,3,10.71,47.79
+madrid,El Pardo,M5: CC -> PUDO -> Recogida Cliente,Amazon Logistics DMA3,16,24.57,24.12,55.4,17,10.88,29.91

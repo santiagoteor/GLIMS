@@ -1,0 +1,6 @@
+﻿ciudad,barrio,modelo,centro_logistico,paquetes,distancia_troncal_ida_km,distancia_troncal_regreso_km,km_recorridos,numero_viajes,emisiones_co2_kg,costo_total_eur
+madrid,Lavapiés,M1: Furgoneta Combustión desde CC,Amazon Logistics DMA3,75,12.76,12.6,75.48,2,16.61,95.72
+madrid,Lavapiés,M2: Furgoneta Eléctrica desde CC,Amazon Logistics DMA3,75,12.76,12.6,75.48,2,0.0,83.03
+madrid,Lavapiés,M3: CC -> Microhub -> Bicicleta,Amazon Logistics DMA3,75,12.76,12.6,53.83,5,5.58,86.31
+madrid,Lavapiés,M4: CC -> PUDO -> Entrega a pie,Amazon Logistics DMA3,75,12.76,12.6,88.17,8,5.58,216.39
+madrid,Lavapiés,M5: CC -> PUDO -> Recogida Cliente,Amazon Logistics DMA3,75,12.76,12.6,88.17,76,7.15,48.91
