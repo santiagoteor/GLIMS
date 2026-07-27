@@ -7,6 +7,13 @@ from sklearn.neighbors import BallTree
 from code.common.constants import (
     CITIES,
     EARTH_RADIUS_METERS,
+    LOCKER_SERVICE_TYPE_CODE,
+    PUDO_SERVICE_TYPE_CODE,
+    CLICK_COLLECT_SERVICE_TYPE_CODE,
+    DISTRIBUTION_CENTER_SERVICE_TYPE_CODE,
+    LAST_MILE_STATION_SERVICE_TYPE_CODE,
+    WAREHOUSE_SERVICE_TYPE_CODE,
+    CONVENIENCE_STORE_SERVICE_TYPE_CODE,
 )
 
 RECORD_TYPE_CATALOG = {
@@ -495,22 +502,23 @@ def assign_location_clusters(
 def classify_cluster_service_type(
     service_codes: set[int],
 ) -> int:
-    has_locker = 1 in service_codes
-    has_pudo = 2 in service_codes
+    has_locker = LOCKER_SERVICE_TYPE_CODE in service_codes
 
-    if service_codes == {1}:
+    has_pudo = PUDO_SERVICE_TYPE_CODE in service_codes
+
+    if service_codes == {LOCKER_SERVICE_TYPE_CODE}:
         return 1
 
-    if service_codes == {2}:
+    if service_codes == {PUDO_SERVICE_TYPE_CODE}:
         return 2
 
     if has_locker and has_pudo:
         return 3
 
-    if service_codes == {3}:
+    if service_codes == {CLICK_COLLECT_SERVICE_TYPE_CODE}:
         return 4
 
-    if service_codes == {7}:
+    if service_codes == {CONVENIENCE_STORE_SERVICE_TYPE_CODE}:
         return 5
 
     if len(service_codes) == 1:

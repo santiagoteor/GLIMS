@@ -1,6 +1,6 @@
 from pathlib import Path
 import re
-from code.common.paths import PROJECT_ROOT, RESULTS_DIR
+from code.common.paths import PROJECT_ROOT, RESULTS_DIR, RAW_DATA_DIR
 from code.common.text_utils import normalize_text, text_similarity
 import numpy as np
 import pandas as pd
@@ -8,12 +8,12 @@ from sklearn.neighbors import BallTree
 from code.common.constants import EARTH_RADIUS_METERS
 
 
-MASTER_FILE = PROJECT_ROOT / "raw_data" / "Points B2C_20250402.xlsx"
+MASTER_FILE = RAW_DATA_DIR / "Points B2C_20250402.xlsx"
 
 CITYPAQ_FILES = {
-    "Barcelona": PROJECT_ROOT / "raw_data" / "Barcelona Citypaq.csv",
-    "Madrid": PROJECT_ROOT / "raw_data" / "Madrid Citypaq.csv",
-    "Valencia": PROJECT_ROOT / "raw_data" / "Valencia Citypaq.csv",
+    "Barcelona": RAW_DATA_DIR / "Barcelona Citypaq.csv",
+    "Madrid": RAW_DATA_DIR / "Madrid Citypaq.csv",
+    "Valencia": RAW_DATA_DIR / "Valencia Citypaq.csv",
 }
 
 OUTPUT_DIR = RESULTS_DIR / "citypaq_source_comparison"
