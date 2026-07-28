@@ -52,6 +52,67 @@ RECORD_TYPE_CATALOG = {
 }
 
 
+PUDO_GROUP_CODE = 1
+MICROHUB_GROUP_CODE = 2
+CC_GROUP_CODE = 3
+UNKNOWN_GROUP_CODE = 0
+
+TYPE_GROUP_CATALOG = {
+    UNKNOWN_GROUP_CODE: {
+        "name": "Unknown",
+        "description": "Record type could not be classified into a group",
+    },
+    PUDO_GROUP_CODE: {
+        "name": "PUDO",
+        "description": (
+            "Locker, Convenience Store, Click & Collect and PUDO records"
+        ),
+    },
+    MICROHUB_GROUP_CODE: {
+        "name": "Microhub",
+        "description": "Last Mile Logistics Station records",
+    },
+    CC_GROUP_CODE: {
+        "name": "CC",
+        "description": (
+            "Distribution / Reception Center and Warehouse records"
+        ),
+    },
+}
+
+# Record_Service_Type_Code -> Type_Group_Code
+RECORD_TYPE_TO_GROUP = {
+    LOCKER_SERVICE_TYPE_CODE: PUDO_GROUP_CODE,
+    CONVENIENCE_STORE_SERVICE_TYPE_CODE: PUDO_GROUP_CODE,
+    CLICK_COLLECT_SERVICE_TYPE_CODE: PUDO_GROUP_CODE,
+    PUDO_SERVICE_TYPE_CODE: PUDO_GROUP_CODE,
+    LAST_MILE_STATION_SERVICE_TYPE_CODE: MICROHUB_GROUP_CODE,
+    DISTRIBUTION_CENTER_SERVICE_TYPE_CODE: CC_GROUP_CODE,
+    WAREHOUSE_SERVICE_TYPE_CODE: CC_GROUP_CODE,
+}
+
+# Record_Service_Type_Code -> capacity. Reserved for future use, not applied
+# in the current classification logic.
+TYPE_CAPACITY = {
+    LOCKER_SERVICE_TYPE_CODE: 60,
+    CONVENIENCE_STORE_SERVICE_TYPE_CODE: 120,
+    CLICK_COLLECT_SERVICE_TYPE_CODE: 120,
+    PUDO_SERVICE_TYPE_CODE: 120,
+    LAST_MILE_STATION_SERVICE_TYPE_CODE: 300,
+    DISTRIBUTION_CENTER_SERVICE_TYPE_CODE: 500,
+    WAREHOUSE_SERVICE_TYPE_CODE: 500,
+}
+
+
+def get_type_group(record_service_type_code) -> int:
+    try:
+        code = int(record_service_type_code)
+    except (TypeError, ValueError):
+        return UNKNOWN_GROUP_CODE
+
+    return RECORD_TYPE_TO_GROUP.get(code, UNKNOWN_GROUP_CODE)
+
+
 CLUSTER_TYPE_CATALOG = {
     1: {
         "name": "Locker only",
@@ -136,7 +197,6 @@ SPATIAL_CONFIDENCE_CATALOG = {
     },
 }
 
-STRONG_DISTANCE_METERS = 5
 CONDITIONAL_DISTANCE_METERS = 15
 REVIEW_DISTANCE_METERS = 30
 WEAK_REVIEW_DISTANCE_METERS = 50
@@ -244,6 +304,20 @@ def load_city_records(city: str) -> pd.DataFrame:
         )
     )
 
+    df["Type_Group_Code"] = (
+        df["Record_Service_Type_Code"].apply(get_type_group)
+    )
+
+    df["Type_Group_Name"] = (
+        df["Type_Group_Code"]
+        .map(
+            {
+                code: values["name"]
+                for code, values in TYPE_GROUP_CATALOG.items()
+            }
+        )
+    )
+
     df["Company_Normalized"] = (
         df["Company"].apply(normalize_text)
     )
@@ -259,6 +333,42 @@ def load_city_records(city: str) -> pd.DataFrame:
     )
 
     return df
+
+
+def remove_exact_duplicates(
+    df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    
+    derived_columns = {
+        "Record_Service_Type_Code",
+        "Record_Service_Type_Name",
+        "Type_Group_Code",
+        "Type_Group_Name",
+        "Company_Normalized",
+        "Location_Normalized",
+        "Address_Normalized",
+    }
+
+    original_columns = [
+        column for column in df.columns
+        if column not in derived_columns
+    ]
+
+    compare_columns = [
+        column for column in original_columns
+        if column != "ID"
+    ]
+
+    duplicate_mask = df.duplicated(
+        subset=compare_columns,
+        keep="first",
+    )
+
+    duplicates_removed = df.loc[duplicate_mask].copy()
+    cleaned = df.loc[~duplicate_mask].reset_index(drop=True)
+
+    return cleaned, duplicates_removed
+
 
 def build_candidate_pairs(
     df: pd.DataFrame,
@@ -335,6 +445,14 @@ def build_candidate_pairs(
                 == row_j["Record_Service_Type_Code"]
             )
 
+            group_1 = row_i["Type_Group_Code"]
+            group_2 = row_j["Type_Group_Code"]
+
+            same_group = (
+                group_1 == group_2
+                and group_1 != UNKNOWN_GROUP_CODE
+            )
+
             strong_address_match = (
                 address_similarity
                 >= ADDRESS_SIMILARITY_THRESHOLD
@@ -354,59 +472,55 @@ def build_candidate_pairs(
                 or strong_location_match
             )
 
-            if distance_m <= STRONG_DISTANCE_METERS:
+            if same_group and strong_text_match:
                 should_cluster = True
-                pair_rule = "distance <= 5m"
-
-            elif (
-                distance_m
-                <= CONDITIONAL_DISTANCE_METERS
-                and strong_text_match
-            ):
-                should_cluster = True
-                pair_rule = (
-                    "distance <= 15m and strong text match"
+                pair_classification = (
+                    "Same group - strong text match"
                 )
+                pair_rule = (
+                    "same group and strong location/address match"
+                )
+
+            elif (not same_group) and strong_text_match:
+                should_cluster = False
+                pair_classification = (
+                    "Different group - kept separate"
+                )
+                pair_rule = (
+                    "different group despite strong text match"
+                )
+
+            elif same_group and not strong_text_match:
+                if distance_m <= CONDITIONAL_DISTANCE_METERS:
+                    should_cluster = True
+                    pair_classification = (
+                        "Same group - close distance"
+                    )
+                    pair_rule = (
+                        "same group and distance <= "
+                        f"{CONDITIONAL_DISTANCE_METERS}m"
+                    )
+                elif distance_m <= REVIEW_DISTANCE_METERS:
+                    should_cluster = False
+                    pair_classification = "Manual review"
+                    pair_rule = (
+                        "same group, weak text match, distance "
+                        f"{CONDITIONAL_DISTANCE_METERS}-"
+                        f"{REVIEW_DISTANCE_METERS}m"
+                    )
+                else:
+                    should_cluster = False
+                    pair_classification = "Different location"
+                    pair_rule = (
+                        "same group but distance > "
+                        f"{REVIEW_DISTANCE_METERS}m"
+                    )
 
             else:
                 should_cluster = False
-                pair_rule = "review candidate only"
-
-            possible_duplicate = (
-                should_cluster
-                and same_company
-                and same_type
-            )
-
-            if should_cluster and not same_company:
-                pair_classification = "Co-location"
-            elif possible_duplicate:
-                pair_classification = (
-                    "Possible duplicate"
-                )
-            elif should_cluster and same_company:
-                pair_classification = (
-                    "Multi-service same company"
-                )
-            elif (
-                distance_m <= REVIEW_DISTANCE_METERS
-                and strong_text_match
-            ):
-                pair_classification = (
-                    "Manual review"
-                )
-            elif (
-                distance_m
-                <= WEAK_REVIEW_DISTANCE_METERS
-                and same_company
-                and strong_text_match
-            ):
-                pair_classification = (
-                    "Manual review"
-                )
-            else:
-                pair_classification = (
-                    "Nearby, no action"
+                pair_classification = "No relation"
+                pair_rule = (
+                    "different group and weak text match"
                 )
 
             rows.append(
@@ -419,6 +533,8 @@ def build_candidate_pairs(
                     "Company_2": row_j.get("Company"),
                     "Type_1": row_i.get("Type"),
                     "Type_2": row_j.get("Type"),
+                    "Group_1": row_i["Type_Group_Name"],
+                    "Group_2": row_j["Type_Group_Name"],
                     "Location_1": row_i.get("Location"),
                     "Location_2": row_j.get("Location"),
                     "Address_1": row_i.get("Address"),
@@ -441,10 +557,8 @@ def build_candidate_pairs(
                     ),
                     "Same_Company": same_company,
                     "Same_Type": same_type,
+                    "Same_Group": same_group,
                     "Should_Cluster": should_cluster,
-                    "Possible_Duplicate": (
-                        possible_duplicate
-                    ),
                     "Pair_Classification": (
                         pair_classification
                     ),
@@ -790,7 +904,17 @@ def export_catalogs() -> None:
             for code, values in RECORD_TYPE_CATALOG.items()
         ]
     )
-      
+
+    type_group_catalog = pd.DataFrame(
+        [
+            {
+                "Code": code,
+                "Name": values["name"],
+                "Description": values["description"],
+            }
+            for code, values in TYPE_GROUP_CATALOG.items()
+        ]
+    )
 
     cluster_catalog = pd.DataFrame(
         [
@@ -802,7 +926,7 @@ def export_catalogs() -> None:
             for code, values in CLUSTER_TYPE_CATALOG.items()
         ]
     )
-    
+
     sharing_catalog = pd.DataFrame(
         [
             {
@@ -831,12 +955,18 @@ def export_catalogs() -> None:
         encoding="utf-8-sig",
     )
 
+    type_group_catalog.to_csv(
+        RESULTS_DIR / "type_group_catalog.csv",
+        index=False,
+        encoding="utf-8-sig",
+    )
+
     cluster_catalog.to_csv(
         RESULTS_DIR / "cluster_service_type_catalog.csv",
         index=False,
         encoding="utf-8-sig",
     )
-    
+
     sharing_catalog.to_csv(
         RESULTS_DIR / "cluster_sharing_type_catalog.csv",
         index=False,
@@ -860,8 +990,6 @@ def add_cluster_review_flags(
 
     A cluster is marked when:
     - its spatial confidence is Review;
-    - it participates in a Manual review pair;
-    - it contains a Possible duplicate;
     - it contains an Unknown or Unclassified service type.
     """
     records_classified = records_classified.copy()
@@ -949,10 +1077,17 @@ def main() -> None:
             f"{df[['Latitude', 'Longitude']].notna().all(axis=1).sum()}"
         )
 
+        print("\nRemoving exact duplicates...")
+        df, duplicates_removed = remove_exact_duplicates(df)
+        print(f"Exact duplicates removed: {len(duplicates_removed)}")
+
         print("\nGenerating candidate pairs...")
         pairs = build_candidate_pairs(df)
 
-        print(f"Pairs within 50 m: {len(pairs)}")
+        print(
+            f"Pairs within {WEAK_REVIEW_DISTANCE_METERS} m: "
+            f"{len(pairs)}"
+        )
 
         clustered_records = assign_location_clusters(
             city=city,
@@ -979,13 +1114,7 @@ def main() -> None:
         )
 
         manual_review = pairs[
-            pairs["Pair_Classification"].isin(
-                [
-                    "Manual review",
-                    "Possible duplicate",
-                    "Multi-service same company",
-                ]
-            )
+            pairs["Pair_Classification"] == "Manual review"
         ].copy()
 
         records_output = (
@@ -1002,7 +1131,7 @@ def main() -> None:
             city_output_dir
             / "manual_review.csv"
         )
-        
+
         candidate_pairs_output = (
             city_output_dir
             / "candidate_pairs.csv"
@@ -1011,6 +1140,11 @@ def main() -> None:
         cluster_edges_output = (
             city_output_dir
             / "cluster_edges.csv"
+        )
+
+        duplicates_output = (
+            city_output_dir
+            / "exact_duplicates_removed.csv"
         )
 
         records_classified.to_csv(
@@ -1030,7 +1164,7 @@ def main() -> None:
             index=False,
             encoding="utf-8-sig",
         )
-        
+
         pairs.to_csv(
             candidate_pairs_output,
             index=False,
@@ -1043,6 +1177,12 @@ def main() -> None:
 
         cluster_edges.to_csv(
             cluster_edges_output,
+            index=False,
+            encoding="utf-8-sig",
+        )
+
+        duplicates_removed.to_csv(
+            duplicates_output,
             index=False,
             encoding="utf-8-sig",
         )
@@ -1071,6 +1211,7 @@ def main() -> None:
         print(f"Saved: {manual_output}")
         print(f"Saved: {candidate_pairs_output}")
         print(f"Saved: {cluster_edges_output}")
+        print(f"Saved: {duplicates_output}")
 
 
 if __name__ == "__main__":
