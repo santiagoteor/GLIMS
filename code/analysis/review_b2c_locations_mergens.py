@@ -20,10 +20,58 @@ ZIP_CODE_COLUMN_CANDIDATES = [
     "Código Postal",
 ]
 
+ID_COLUMN = "ID"
+
 # Columns that describe the cluster/location itself rather than an
-# individual record. These get a single value per merged row instead of
-# being concatenated with "+".
-SPECIAL_SINGLE_VALUE_COLUMNS = {
+# individual record, and that are guaranteed to be identical across every
+# record of the same cluster. These get a single value per merged row
+# instead of being concatenated with "+".
+SINGLE_VALUE_COLUMNS = {
+    "Type_Group_Code",
+    "Cluster_Record_Count",
+    "Cluster_Company_Count",
+    "Has_Locker",
+    "Has_PUDO",
+    "Has_Click_Collect",
+    "Has_Distribution_Center",
+    "Has_Last_Mile_Station",
+    "Has_Warehouse",
+    "Has_Convenience_Store",
+    "Has_Unknown",
+    "Cluster_Service_Type_Code",
+    "Cluster_Service_Type_Name",
+    "Cluster_Sharing_Type_Code",
+    "Cluster_Sharing_Type_Name",
+    "Cluster_Diameter_m",
+    "Cluster_Spatial_Confidence_Code",
+    "Cluster_Spatial_Confidence_Name",
+    "Cluster_Review_Required",
+}
+
+# Columns where repeated identical values are collapsed to one before
+# joining with "+", so "Privada + Privada" becomes just "Privada", but
+# genuinely different values ("Convenience Stores + Lsp Pudos") are kept.
+DEDUP_JOIN_COLUMNS = {
+    "Type",
+    "Infrastructure",
+    "Type Infrastructure",
+    "City",
+    "Type_raw",
+    "Infrastructure_raw",
+    "Type Infrastructure_raw",
+    "City_raw",
+}
+
+# Internal helper columns dropped entirely from the merged output.
+DROPPED_COLUMNS = {
+    "Company_Normalized",
+    "Location_Normalized",
+    "Address_Normalized",
+}
+
+# Columns already assigned an explicit value before the generic loop runs,
+# so the loop must skip them.
+ALREADY_ASSIGNED_COLUMNS = {
     "Location_Cluster_ID",
     "Type_Group_Name",
     "Location",
@@ -66,6 +114,30 @@ def join_column(series: pd.Series) -> str:
     return " + ".join(values)
 
 
+def dedup_join_column(series: pd.Series) -> str:
+    seen = set()
+    values = []
+
+    for value in series:
+        if pd.notna(value) and str(value).strip():
+            text = str(value).strip()
+
+            if text not in seen:
+                seen.add(text)
+                values.append(text)
+
+    return " + ".join(values)
+
+
+def compute_id_final(series: pd.Series):
+    numeric_ids = pd.to_numeric(series, errors="coerce").dropna()
+
+    if numeric_ids.empty:
+        return None
+
+    return int(numeric_ids.min())
+
+
 def load_records_classified(city: str) -> pd.DataFrame:
     records_file = (
         RESULTS_DIR
@@ -100,15 +172,10 @@ def merge_city_clusters(city: str) -> pd.DataFrame:
     if mergeable.empty:
         return pd.DataFrame()
 
-    special_columns = set(SPECIAL_SINGLE_VALUE_COLUMNS)
+    already_assigned = set(ALREADY_ASSIGNED_COLUMNS)
 
     if zip_column is not None:
-        special_columns.add(zip_column)
-
-    join_columns = [
-        column for column in mergeable.columns
-        if column not in special_columns
-    ]
+        already_assigned.add(zip_column)
 
     rows = []
 
@@ -121,26 +188,51 @@ def merge_city_clusters(city: str) -> pd.DataFrame:
         merged_row = {
             "Location_Cluster_ID": cluster_id,
             "Merged_Record_Count": len(group),
-            "Main_Type": group["Type_Group_Name"].iloc[0],
-            "Location": first_non_null(
-                group.get("Location", pd.Series(dtype="object"))
-            ),
-            "Address": first_non_null(
-                group.get("Address", pd.Series(dtype="object"))
-            ),
-            "Latitude": group["Latitude"].mean(),
-            "Longitude": group["Longitude"].mean(),
-            "Capacity_Sum": sum(
-                TYPE_CAPACITY.get(int(code), 0)
-                for code in group["Record_Service_Type_Code"].dropna()
+            "Main_Type": (
+                group["Type_Group_Name"].iloc[0]
+                if "Type_Group_Name" in group.columns
+                else None
             ),
         }
 
-        if zip_column is not None:
-            merged_row["Zip_Code"] = first_non_null(group[zip_column])
+        if ID_COLUMN in group.columns:
+            merged_row["id_final"] = compute_id_final(
+                group[ID_COLUMN]
+            )
 
-        for column in join_columns:
-            merged_row[column] = join_column(group[column])
+        merged_row["Location"] = first_non_null(
+            group.get("Location", pd.Series(dtype="object"))
+        )
+        merged_row["Address"] = first_non_null(
+            group.get("Address", pd.Series(dtype="object"))
+        )
+        merged_row["Latitude"] = group["Latitude"].mean()
+        merged_row["Longitude"] = group["Longitude"].mean()
+        merged_row["Capacity_Sum"] = sum(
+            TYPE_CAPACITY.get(int(code), 0)
+            for code in group["Record_Service_Type_Code"].dropna()
+        )
+
+        if zip_column is not None:
+            merged_row["Zip_Code"] = first_non_null(
+                group[zip_column]
+            )
+
+        for column in mergeable.columns:
+            if column in already_assigned:
+                continue
+
+            if column in DROPPED_COLUMNS:
+                continue
+
+            if column in SINGLE_VALUE_COLUMNS:
+                merged_row[column] = group[column].iloc[0]
+            elif column in DEDUP_JOIN_COLUMNS:
+                merged_row[column] = dedup_join_column(
+                    group[column]
+                )
+            else:
+                merged_row[column] = join_column(group[column])
 
         rows.append(merged_row)
 
