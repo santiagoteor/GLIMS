@@ -14,9 +14,10 @@ import numpy as np
 
 from code.common.constants import (
     EARTH_RADIUS_METERS,
+    MICROHUB_FACILITY_CODES,
     ORIGIN_FACILITY_CODES,
+    PUDO_FACILITY_CODES,
 )
-
 
 
 @dataclass(frozen=True)
@@ -42,8 +43,8 @@ def select_operational_point(
     Parameters
     ----------
     strategy:
-        Selection policy. Supported strategies are ``centroid`` and
-        ``nearest_origin_facility``.
+        Selection policy. Supported strategies are ``centroid``,
+        ``nearest_origin_facility``, and ``nearest_microhub_facility``.
     neighborhood_records:
         Delivery points assigned to the neighborhood. ``Latitude`` and
         ``Longitude`` columns are required for the centroid strategy.
@@ -80,6 +81,45 @@ def select_operational_point(
             target_longitude=target_longitude,
         )
 
+    if strategy == "nearest_microhub_facility":
+        if classified_records is None:
+            raise ValueError(
+                "classified_records is required for "
+                "'nearest_microhub_facility'."
+            )
+
+        if target_latitude is None or target_longitude is None:
+            raise ValueError(
+                "target coordinates are required for "
+                "'nearest_microhub_facility'."
+            )
+
+        return select_nearest_microhub_facility(
+            records=classified_records,
+            target_latitude=target_latitude,
+            target_longitude=target_longitude,
+        )
+        
+    if strategy == "nearest_pudo_facility":
+        if classified_records is None:
+            raise ValueError(
+                "classified_records is required for "
+                "'nearest_pudo_facility'."
+            )
+
+        if target_latitude is None or target_longitude is None:
+            raise ValueError(
+                "target coordinates are required for "
+                "'nearest_pudo_facility'."
+            )
+
+        return select_nearest_pudo_facility(
+            records=classified_records,
+            target_latitude=target_latitude,
+            target_longitude=target_longitude,
+        )    
+        
+
     if strategy == "centroid":
         required_columns = {"Latitude", "Longitude"}
         missing_columns = required_columns.difference(
@@ -114,7 +154,8 @@ def select_operational_point(
 
     raise ValueError(
         f"Unsupported operational-point strategy: '{strategy}'. "
-        "Supported strategies: centroid, nearest_origin_facility."
+        "Supported strategies: centroid, nearest_origin_facility, "
+        "nearest_microhub_facility, nearest_pudo_facility."
     )
 
 def get_facility_candidates(
@@ -218,21 +259,199 @@ def select_nearest_origin_facility(
     nearest_position = int(np.argmin(distances_m))
     nearest_record = candidates.iloc[nearest_position]
 
-    facility_name = str(
-        nearest_record.get(
-            "Location",
-            nearest_record.get(
-                "Record_Service_Type_Name",
-                "Origin facility",
-            ),
-        )
-    ).strip()
+    location = nearest_record.get("Location")
+    company = nearest_record.get("Company")
+    address = nearest_record.get("Address")
+    service_type = nearest_record.get(
+        "Record_Service_Type_Name",
+        "Microhub facility",
+    )
 
+    if pd.isna(location) or not str(location).strip():
+        if pd.notna(company) and pd.notna(address):
+            facility_name = f"{company} - {address}"
+        elif pd.notna(company):
+            facility_name = str(company).strip()
+        elif pd.notna(address):
+            facility_name = str(address).strip()
+        else:
+            facility_name = str(service_type).strip()
+    else:
+        facility_name = str(location).strip()
+        
     return OperationalPoint(
         name=facility_name or "Origin facility",
         latitude=float(nearest_record["Latitude"]),
         longitude=float(nearest_record["Longitude"]),
         point_type="origin_facility",
         strategy="nearest_origin_facility",
+        is_virtual=False,
+    )
+
+def select_nearest_microhub_facility(
+    records: pd.DataFrame,
+    target_latitude: float,
+    target_longitude: float,
+) -> OperationalPoint:
+    """
+    Select the microhub facility with the shortest radial distance
+    to the target coordinates.
+    """
+
+    candidates = get_facility_candidates(
+        records=records,
+        allowed_service_codes=MICROHUB_FACILITY_CODES,
+    )
+
+    if candidates.empty:
+        raise ValueError(
+            "No valid microhub facilities were found."
+        )
+
+    target_latitude_rad = np.radians(target_latitude)
+    target_longitude_rad = np.radians(target_longitude)
+
+    candidate_latitudes_rad = np.radians(
+        candidates["Latitude"].to_numpy()
+    )
+    candidate_longitudes_rad = np.radians(
+        candidates["Longitude"].to_numpy()
+    )
+
+    latitude_difference = (
+        candidate_latitudes_rad - target_latitude_rad
+    )
+    longitude_difference = (
+        candidate_longitudes_rad - target_longitude_rad
+    )
+
+    haversine_value = (
+        np.sin(latitude_difference / 2) ** 2
+        + np.cos(target_latitude_rad)
+        * np.cos(candidate_latitudes_rad)
+        * np.sin(longitude_difference / 2) ** 2
+    )
+
+    angular_distance = 2 * np.arcsin(
+        np.sqrt(haversine_value)
+    )
+    distances_m = EARTH_RADIUS_METERS * angular_distance
+
+    nearest_position = int(np.argmin(distances_m))
+    nearest_record = candidates.iloc[nearest_position]
+
+    location = nearest_record.get("Location")
+    company = nearest_record.get("Company")
+    address = nearest_record.get("Address")
+    service_type = nearest_record.get(
+        "Record_Service_Type_Name",
+        "Microhub facility",
+    )
+
+    if pd.isna(location) or not str(location).strip():
+        if pd.notna(company) and pd.notna(address):
+            facility_name = f"{company} - {address}"
+        elif pd.notna(company):
+            facility_name = str(company).strip()
+        elif pd.notna(address):
+            facility_name = str(address).strip()
+        else:
+            facility_name = str(service_type).strip()
+    else:
+        facility_name = str(location).strip()
+
+    return OperationalPoint(
+        name=facility_name or "Microhub facility",
+        latitude=float(nearest_record["Latitude"]),
+        longitude=float(nearest_record["Longitude"]),
+        point_type="microhub",
+        strategy="nearest_microhub_facility",
+        is_virtual=False,
+    )
+       
+
+def select_nearest_pudo_facility(
+    records: pd.DataFrame,
+    target_latitude: float,
+    target_longitude: float,
+) -> OperationalPoint:
+    """
+    Select the PUDO facility with the shortest radial distance
+    to the target coordinates.
+    """
+
+    candidates = get_facility_candidates(
+        records=records,
+        allowed_service_codes=PUDO_FACILITY_CODES,
+    )
+
+    if candidates.empty:
+        raise ValueError(
+            "No valid PUDO facilities were found."
+        )
+
+    target_latitude_rad = np.radians(target_latitude)
+    target_longitude_rad = np.radians(target_longitude)
+
+    candidate_latitudes_rad = np.radians(
+        candidates["Latitude"].to_numpy()
+    )
+    candidate_longitudes_rad = np.radians(
+        candidates["Longitude"].to_numpy()
+    )
+
+    latitude_difference = (
+        candidate_latitudes_rad - target_latitude_rad
+    )
+    longitude_difference = (
+        candidate_longitudes_rad - target_longitude_rad
+    )
+
+    haversine_value = (
+        np.sin(latitude_difference / 2) ** 2
+        + np.cos(target_latitude_rad)
+        * np.cos(candidate_latitudes_rad)
+        * np.sin(longitude_difference / 2) ** 2
+    )
+
+    angular_distance = 2 * np.arcsin(
+        np.sqrt(haversine_value)
+    )
+    distances_m = EARTH_RADIUS_METERS * angular_distance
+
+    nearest_position = int(np.argmin(distances_m))
+    nearest_record = candidates.iloc[nearest_position]
+
+    location = nearest_record.get("Location")
+    company = nearest_record.get("Company")
+    address = nearest_record.get("Address")
+    service_type = nearest_record.get(
+        "Record_Service_Type_Name",
+        "PUDO facility",
+    )
+
+    if pd.isna(location) or not str(location).strip():
+        if pd.notna(company) and pd.notna(address):
+            facility_name = (
+                f"{str(company).strip()} - "
+                f"{str(address).strip()}"
+            )
+        elif pd.notna(company):
+            facility_name = str(company).strip()
+        elif pd.notna(address):
+            facility_name = str(address).strip()
+        elif pd.notna(service_type):
+            facility_name = str(service_type).strip()
+        else:
+            facility_name = "PUDO facility"
+    else:
+        facility_name = str(location).strip()
+
+    return OperationalPoint(
+        name=facility_name,
+        latitude=float(nearest_record["Latitude"]),
+        longitude=float(nearest_record["Longitude"]),
+        point_type="pudo",
+        strategy="nearest_pudo_facility",
         is_virtual=False,
     )

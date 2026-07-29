@@ -2,19 +2,32 @@
 __pycache__/
 *.py[cod]
 
-# Editor settings
+# Jupyter
+.ipynb_checkpoints/
+
+# Cache
+code/cache/
+
+# Resultados
+results/
+output/
+
+# Logs
+*.log
+
+# Archivos temporales
+*.tmp
+*.bak
+
+# Entornos virtuales
+.venv/
+venv/
+
+# VS Code
 .vscode/
 
-# Operating system files
-.DS_Store
-Thumbs.db
+# PyCharm
+.idea/
 
-# CityPaq source and temporary exports
-raw_data/*CityPaq*.txt
-raw_data/*CityPaq*.csv
-raw_data/*Citypaq*.txt
-raw_data/*Citypaq*.csv
-
-# Intermediate locker-distance reports
-results/*/nearby_lockers_report.csv
-results/*/nearby_lockers_scored_report.csv
+data/osmr/
+code/notebooks/
