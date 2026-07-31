@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-CITIES = [
-    "barcelona",
-    "madrid",
-    "valencia",
-]
+CITIES = ["barcelona","madrid","valencia"]
 
 EARTH_RADIUS_METERS = 6_371_000
 
@@ -45,3 +41,36 @@ PUDO_FACILITY_CODES = frozenset(
         CONVENIENCE_STORE_SERVICE_TYPE_CODE,
     }
 )
+
+SERVICE_TIME_PER_STOP_MIN = 5.0
+
+OSRM_PORTS = {
+    "madrid": {
+        "driving": 5000,
+        "cycling": 5001,
+        "walking": 5002,
+    },
+    "barcelona": {
+        "driving": 5010,
+        "cycling": 5011,
+        "walking": 5012,
+    },
+    "valencia": {
+        "driving": 5020,
+        "cycling": 5021,
+        "walking": 5022,
+    },
+}
+
+MAX_ROUTE_DURATION_MIN = 480.0
+
+DIRECT_VAN_LOADING_TIME_PER_ROUTE_MIN = 15.0
+TRUCK_LOADING_TIME_PER_ROUTE_MIN = 15.0
+BIKE_PREPARATION_TIME_PER_ROUTE_MIN = 10.0
+WALKING_PREPARATION_TIME_PER_ROUTE_MIN = 5.0
+
+OSRM_PROBE_COORDS = {
+    "madrid": [(-3.703790, 40.416775), (-3.693790, 40.426775)],
+    "barcelona": [(2.173404, 41.385064), (2.183404, 41.395064)],
+    "valencia": [(-0.376288, 39.469907), (-0.366288, 39.479907)],
+}
