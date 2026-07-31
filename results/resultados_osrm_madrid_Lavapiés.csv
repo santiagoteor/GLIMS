@@ -1,6 +1,6 @@
-﻿ciudad,barrio,modelo,centro_logistico,paquetes,distancia_troncal_ida_km,distancia_troncal_regreso_km,km_recorridos,numero_viajes,emisiones_co2_kg,costo_total_eur
-madrid,Lavapiés,M1: Furgoneta Combustión desde CC,Amazon Logistics DMA3,75,12.76,12.6,75.48,2,16.61,95.72
-madrid,Lavapiés,M2: Furgoneta Eléctrica desde CC,Amazon Logistics DMA3,75,12.76,12.6,75.48,2,0.0,83.03
-madrid,Lavapiés,M3: CC -> Microhub -> Bicicleta,Amazon Logistics DMA3,75,12.76,12.6,53.83,5,5.58,86.31
-madrid,Lavapiés,M4: CC -> PUDO -> Entrega a pie,Amazon Logistics DMA3,75,12.76,12.6,88.17,8,5.58,216.39
-madrid,Lavapiés,M5: CC -> PUDO -> Recogida Cliente,Amazon Logistics DMA3,75,12.76,12.6,88.17,76,7.15,48.91
+﻿ciudad,barrio,modelo,centro_logistico,punto_ultima_milla,latitud_punto_ultima_milla,longitud_punto_ultima_milla,tipo_punto_ultima_milla,estrategia_punto_ultima_milla,paquetes,distancia_troncal_ida_km,distancia_troncal_regreso_km,km_recorridos,numero_viajes,emisiones_co2_kg,costo_total_eur
+madrid,Lavapiés,M1: Furgoneta Combustión desde CC,Amazon Logistics DMA3,Virtual neighborhood centroid,40.409529202497104,-3.7020977110505995,centroid,centroid,300,12.763200000000001,12.5997,216.40189999999996,5,47.60841799999999,274.43695499999995
+madrid,Lavapiés,M2: Furgoneta Eléctrica desde CC,Amazon Logistics DMA3,Virtual neighborhood centroid,40.409529202497104,-3.7020977110505995,centroid,centroid,300,12.763200000000001,12.5997,216.40189999999996,5,0.0,238.04208999999997
+madrid,Lavapiés,M3: CC -> Microhub -> Bicicleta,Amazon Logistics DMA3,"Mrw - Terminal de Transporte de Mercancías , Méndez Álvaro, 84",40.3905249887998,-3.67642616856631,microhub,nearest_microhub_facility,300,13.9628,13.679200000000002,252.5198000000001,16,6.081240000000001,293.56059000000005
+madrid,Lavapiés,M4: CC -> PUDO -> Entrega a pie,Amazon Logistics DMA3,El Estanco De Lavapies,40.4098001421872,-3.70198171959094,pudo,nearest_pudo_facility,300,12.7382,12.624600000000001,73.90569999999998,26,5.579816,290.8609933333333
+madrid,Lavapiés,M5: CC -> PUDO -> Recogida Cliente,Amazon Logistics DMA3,El Estanco De Lavapies,40.4098001421872,-3.70198171959094,pudo,nearest_pudo_facility,300,12.7382,12.624600000000001,389.4251999999999,301,14.681375999999997,161.41326

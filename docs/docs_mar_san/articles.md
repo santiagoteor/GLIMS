@@ -1,0 +1,7 @@
+- Gruber, J., Kihm, A., & Lenz, B. (2014). A New Vehicle for Urban Freight? An Ex-Ante Evaluation of Electric Cargo Bikes in Courier Services.
+- Conway, A., Eickemeyer, P., Cheng, J., et al. (2017). Urban Micro-Consolidation and Last Mile Goods Delivery by Freight-Tricycle in Manhattan: Opportunities and Challenges.
+- CycleLogistics Project (European Commission). CycleLogistics Project Reports and Technical Documents.
+- CITY CHANGER CARGO BIKE Project (European Union Horizon 2020). CITY CHANGER CARGO BIKE – Project Reports and Technical Documents.
+- ISO 11228-1. Ergonomics — Manual Handling — Part 1: Lifting, Carrying and Lowering.
+- Waters, T. R., Putz-Anderson, V., Garg, A., & Fine, L. J. (1993). Revised NIOSH Equation for the Design and Evaluation of Manual Lifting Tasks.
+- European Agency for Safety and Health at Work (EU-OSHA). Work-Related Musculoskeletal Disorders: Manual Handling of Loads.
