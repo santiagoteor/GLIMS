@@ -1,6 +1,0 @@
-﻿ciudad,barrio,modelo,centro_logistico,paquetes,distancia_troncal_km,km_recorridos,numero_viajes,emisiones_co2_kg,costo_total_eur
-valencia,Benicalap,M1: Furgoneta Combustión desde CC,Amazon VLC1,60,58.21215226154649,127.3642421977045,1,28.02013328349499,161.52101624163436
-valencia,Benicalap,M2: Furgoneta Eléctrica desde CC,Amazon VLC1,60,58.21215226154649,127.3642421977045,1,0.0,140.10066641747497
-valencia,Benicalap,M3: CC -> Microhub -> Bicicleta,Amazon VLC1,60,58.21215226154649,129.0052328488962,4,25.61334699508046,110.60091177748524
-valencia,Benicalap,M4: CC -> PUDO -> Entrega a pie,Amazon VLC1,60,58.21215226154649,179.09998702260873,6,25.61334699508046,249.52609036743382
-valencia,Benicalap,M5: CC -> PUDO -> Recogida Cliente,Amazon VLC1,60,58.21215226154649,179.09998702260873,61,27.18023905756835,82.39093703539184

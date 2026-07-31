@@ -1,6 +1,0 @@
-﻿ciudad,barrio,modelo,centro_logistico,paquetes,distancia_troncal_km,km_recorridos,numero_viajes,emisiones_co2_kg,costo_total_eur
-barcelona,Ciutat Vella,M1: Furgoneta Combustión desde CC,DCT9 Amazon Logistics,256,6.158339435692853,89.16544619176133,5,19.61639816218749,113.07799767046096
-barcelona,Ciutat Vella,M2: Furgoneta Eléctrica desde CC,DCT9 Amazon Logistics,256,6.158339435692853,89.16544619176133,5,0.0,98.08199081093747
-barcelona,Ciutat Vella,M3: CC -> Microhub -> Bicicleta,DCT9 Amazon Logistics,256,6.158339435692853,44.03603848144343,14,2.7096693517048553,83.84783308268418
-barcelona,Ciutat Vella,M4: CC -> PUDO -> Entrega a pie,DCT9 Amazon Logistics,256,6.158339435692853,423.72566590326784,23,2.7096693517048553,1230.6331375771426
-barcelona,Ciutat Vella,M5: CC -> PUDO -> Recogida Cliente,DCT9 Amazon Logistics,256,6.158339435692853,423.72566590326784,257,12.994894027501909,133.54250549212358

@@ -1,6 +1,0 @@
-﻿ciudad,barrio,modelo,centro_logistico,paquetes,distancia_troncal_km,km_recorridos,numero_viajes,emisiones_co2_kg,costo_total_eur
-valencia,La Punta,M1: Furgoneta Combustión desde CC,Amazon VLC1,6,61.61441456840376,129.4278364501344,1,28.474124019029567,164.13802895267045
-valencia,La Punta,M2: Furgoneta Eléctrica desde CC,Amazon VLC1,6,61.61441456840376,129.4278364501344,1,0.0,142.37062009514784
-valencia,La Punta,M3: CC -> Microhub -> Bicicleta,Amazon VLC1,6,61.61441456840376,130.35768754713342,2,27.110342410097655,107.9382744424056
-valencia,La Punta,M4: CC -> PUDO -> Entrega a pie,Amazon VLC1,6,61.61441456840376,131.96255236899324,2,27.110342410097655,81.7429017307253
-valencia,La Punta,M5: CC -> PUDO -> Recogida Cliente,Amazon VLC1,6,61.61441456840376,131.96255236899324,7,27.3286854909023,58.45297311156339

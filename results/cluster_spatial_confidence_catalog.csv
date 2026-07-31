@@ -1,4 +1,0 @@
-﻿Code,Name,Description
-1,High,Maximum cluster diameter less than or equal to 15 m
-2,Medium,Maximum cluster diameter greater than 15 m and less than or equal to 30 m
-3,Review,Maximum cluster diameter greater than 30 m
