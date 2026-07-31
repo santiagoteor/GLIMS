@@ -22,16 +22,15 @@ Level A/B/C increments will be built. It is **not** the paper deliverable.
 ## 2. Scope
 
 **In scope**
-- At minimum, **one neighborhood executed end to end** (currently Madrid /
-  Moratalaz). 
+- At minimum, **one neighborhood executed end to end** (currently one for Barcelona). 
 - All five models: M1 (combustion baseline), M2 (electric van), M3
   (microhub + cargo bike), M4 (PUDO + on-foot delivery), M5 (PUDO + customer
   pickup). Could contain fake data. 
-- Real OSM or OSMR routing and the four committed KPIs.
+- Real OSM or OSMR routing and the committed KPIs.
+- Use CWS
 
 **Out of scope (name these as next steps, do not simulate them)**
 - CWS / multi-start / ILS optimization.
-- Full Location-Routing Problem (facility location among candidate sites).
 - AI/ML demand or traffic prediction; stochastic/simheuristic components.
 
 ---
@@ -48,17 +47,17 @@ Level A/B/C increments will be built. It is **not** the paper deliverable.
 The street network itself is fetched by OSMnx at runtime (with caching), not
 stored in `data/`.
 
+(and the data for the instances of demand, by Open data BCN)
+
 ---
 
 ## 4. Pipeline (end to end)
 
 1. **Data preparation** — normalize and load the CSVs.
 2. **Network load & node assignment** — download or use the drive network, snap
-   customers and centers to nearest OSM nodes.
+   customers and centers to nearest OSM nodes. We have to approximate distances if the strret is too much long
 3. **Center selection** — pick the nearest existing consolidation center per
-   neighborhood.
-4. **Distance computation** — Dijkstra distance matrix inside the neighborhood;
-   A\* for the CC→neighborhood trunk distance.
+   neighborhood. 
 5. **Model evaluation** — compute the five models (cost, CO₂, trips, km).
 6. **Export** — write the results CSV; render comparison charts.
 
@@ -70,8 +69,8 @@ reproducible**.
 ## 5. How to run
 
 ```python
-CIUDAD_ACTIVA = "madrid"        # "madrid", "barcelona", or "valencia"
-BARRIO_ACTIVO = "Moratalaz"     # None = all neighborhoods / a name = just one
+CIUDAD_ACTIVA = "barcelona"        # "madrid", "barcelona", or "valencia"
+BARRIO_ACTIVO = "eixample"     # None = all neighborhoods / a name = just one
 ```
 
 Results are written to:
@@ -132,8 +131,6 @@ The demo is "ready to show" when:
 
 Being explicit about these keeps the demo honest and pre-empts questions:
 
-- **Routing is a provisional NN heuristic**, not an optimized CVRP. Route quality
-  will improve with CWS (Level A) and ILS (Level B).
 - **Depot = geometric centroid** of the neighborhood, not a real facility. This
   moves to real candidate sites at Level C.
 - **`km_internos` does not scale with `numero_viajes`** (the Point-2 issue).

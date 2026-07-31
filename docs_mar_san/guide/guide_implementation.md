@@ -9,38 +9,26 @@
 * Bicycle Network
 * Pedestrian Network
 
-**Locations** (this one is useful to located PUDOs and lockers)
-
-* Parking Lots
-* Markets
-* Stations
-* Post Offices
-* Municipal Buildings
-* Available Land Parcels
-
 **Logistics Points**
 
 * PUDO Points
 * Lockers
 * Partner Stores
+* Microhubs
+* CC 
 
 **Demographic Data**
 
 * Population
 * Population Density
-* Income (maybe not neccesary if we hace in ming density of logistic points as the only variable for income and vulnerability)
+* Income (maybe not neccesary if we have in mind density of logistic points as the only variable for income and vulnerability)
 * Vulnerability Index (still idk how to do that 23/07/2026)
 
 **Logistics Data**
 
 * Historical Orders (could be simulated I think)
 * Delivery Addresses (could be simulated I think)
-* Time Windows (maybe we have to take a look to the article in ESADE about time windows)
-* Package Weight (have more than a weight? or the same in all?)
-* E-commerce (idk how 23/07/2026)
-
-
-
+* Time Windows (maybe we have to take a look to the article in ESADE about time windows) (maybe not necessary, too much complex 29072026)
 
 ## Module 2: Prediction of demand with AI
 
@@ -50,7 +38,6 @@ We have to predict where, when and how much about the orders
 
 **In my opinion** we need a BBDD with data of this type: 
 
-* Order History
 * Day of the Week
 * Time of Day
 * Weather
@@ -60,6 +47,7 @@ We have to predict where, when and how much about the orders
 * Population
 * Income
 * Land Use
+* Traffic
 
 
 ### Posible algorithms 
@@ -70,8 +58,6 @@ We have to predict where, when and how much about the orders
 * Random Forest
 
 #### Other methods more similar to traditional AI or with temporal components
-* LSTM
-* Temporal Transformer
 * Prophet
 * ARIMA
 
@@ -82,8 +68,7 @@ We have to predict where, when and how much about the orders
 * R^2
 
 
-
-## Module 3: Optimum location for instalations
+<!-- ## Module 3: Optimum location for instalations
 
 ### Objetive: Choose how many centers and where have they to be located
 
@@ -92,33 +77,37 @@ We have to predict where, when and how much about the orders
 We have to use: 
 
 * Predictions of module 2 to know all the demand
-* Data of module 1
+* Data of module 1 -->
 
 ### Tools
 
-**LRP Problem**
+**LRP/VRP Problem**
 
-**Algoritmos**
+**Algorithms**
 
 Clarke & Wright
 Multi-start (could be better to compare)
-GRASP
+Maybe another, I have to research
 
-**Metaheurístics**
+**Metaheuristics**
 
 ILS
+GRASP
 Tabu Search (could be better to compare)
 Simulated Annealing
 Genetic Algorithms
 
+(We have to research too about assigment logistic points and clients)
+
 ### KPIs
 
-*Total cost*
-*Number of hubs*
-*Coverage*
+*total cost*
+*coverage*
 *average distance*
+*time*
 *Used capacity*
-
+*travel number*
+*emissions*
 
 ## Module 4: Route Optimization (PR2)
 
@@ -246,7 +235,7 @@ reparƟdors, (8) nombre de viatges a peu dels clients, (9) emissions totals, ide
 diversos indicadors; si no és possible, CO₂, i (10) cost total del sistema.'
 ---
 
-# Module 6: Flexible Microhubs (New Scientific Contribution)
+<!-- # Module 6: Flexible Microhubs (New Scientific Contribution)
 
 ### Objective
 
@@ -340,7 +329,7 @@ Flexible Microhub
 * Return on Investment (ROI)
 * Payback period
 
----
+--- -->
 
 # Module 7: Final Evaluation and Decision Support
 
