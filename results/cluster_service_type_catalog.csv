@@ -1,8 +1,0 @@
-﻿Code,Name,Description
-1,Locker only,The location contains only Locker records
-2,PUDO only,The location contains only PUDO records
-3,Locker and PUDO,The location contains at least one Locker and one PUDO
-4,Click & Collect only,The location contains only Click & Collect records
-5,Convenience Store only,The location contains only Convenience Store records
-6,Other single service,The location contains a single service type other than Locker or PUDO
-7,Multiple services,The location contains multiple service types

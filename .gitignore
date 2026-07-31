@@ -7,19 +7,20 @@ __pycache__/
 
 # Cache
 code/cache/
+cache/
 
-# Resultados
+# Results
 results/
 output/
 
 # Logs
 *.log
 
-# Archivos temporales
+# Temporary files
 *.tmp
 *.bak
 
-# Entornos virtuales
+# Virtual environments
 .venv/
 venv/
 
@@ -31,3 +32,11 @@ venv/
 
 data/osmr/
 code/notebooks/
+
+# Operating system
+.DS_Store
+Thumbs.db
+
+# Documents
+.docs\docs_mar_san
+    

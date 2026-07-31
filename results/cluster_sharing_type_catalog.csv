@@ -1,5 +1,0 @@
-﻿Code,Name,Description
-1,Single record,The location contains a single record
-2,"Same company, multiple records",The location contains multiple records from a single company
-3,"Multiple companies, single service",The location contains multiple companies and a single service type
-4,"Multiple companies, multiple services",The location contains multiple companies and multiple service types

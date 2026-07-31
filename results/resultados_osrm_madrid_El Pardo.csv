@@ -1,6 +1,0 @@
-﻿ciudad,barrio,modelo,centro_logistico,paquetes,distancia_troncal_ida_km,distancia_troncal_regreso_km,km_recorridos,numero_viajes,emisiones_co2_kg,costo_total_eur
-madrid,El Pardo,M1: Furgoneta Combustión desde CC,Amazon DMA2 Logística,16,13.18,13.29,29.02,1,6.38,36.8
-madrid,El Pardo,M2: Furgoneta Eléctrica desde CC,Amazon DMA2 Logística,16,13.18,13.29,29.02,1,0.0,31.92
-madrid,El Pardo,M3: CC -> Microhub -> Bicicleta,Amazon DMA2 Logística,16,13.18,13.29,29.4,2,5.82,59.99
-madrid,El Pardo,M4: CC -> PUDO -> Entrega a pie,Amazon DMA2 Logística,16,13.18,13.29,30.36,3,5.82,30.3
-madrid,El Pardo,M5: CC -> PUDO -> Recogida Cliente,Amazon DMA2 Logística,16,13.18,13.29,30.36,17,5.92,19.91

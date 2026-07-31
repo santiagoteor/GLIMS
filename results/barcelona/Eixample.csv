@@ -1,6 +1,0 @@
-﻿ciudad,barrio,modelo,centro_logistico,paquetes,distancia_troncal_km,km_recorridos,numero_viajes,emisiones_co2_kg,costo_total_eur
-barcelona,Eixample,M1: Furgoneta Combustión desde CC,DCT9 Amazon Logistics,416,5.7270384960727245,123.34476043899343,7,27.135847296578554,156.4235825567235
-barcelona,Eixample,M2: Furgoneta Eléctrica desde CC,DCT9 Amazon Logistics,416,5.7270384960727245,123.34476043899343,7,0.0,135.67923648289278
-barcelona,Eixample,M3: CC -> Microhub -> Bicicleta,DCT9 Amazon Logistics,416,5.7270384960727245,61.095231710217035,22,2.519896938271999,102.27754710044061
-barcelona,Eixample,M4: CC -> PUDO -> Entrega a pie,DCT9 Amazon Logistics,416,5.7270384960727245,881.9737642322889,36,2.519896938271999,2534.540167286848
-barcelona,Eixample,M5: CC -> PUDO -> Recogida Cliente,DCT9 Amazon Logistics,416,5.7270384960727245,881.9737642322889,417,24.282889119275584,213.15433464646546
