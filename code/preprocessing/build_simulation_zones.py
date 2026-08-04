@@ -1,27 +1,3 @@
-"""
-Combine OSM districts and neighborhoods into a single zones file per city.
-
-Produces one GeoJSON per city containing every district (admin_level 9)
-and every neighborhood (admin_level 10), each tagged with its type. WHICH
-zones to actually simulate is decided later, at simulation time
-(osrm_simulator --zones ...), so this step is level-agnostic and needs no
-hardcoded list.
-
-Output columns (names kept in Spanish because osrm_simulator reads them by
-these exact names; the *values* of `tipo` are English):
-    zona          zone name (from OSM 'name')
-    tipo          'district' or 'neighborhood'   <- what the zone is
-    admin_level   '9' or '10'
-    geometry      the real polygon
-
-Output, per city:
-    DATA_DIR/<city>/limites_zonas.geojson
-
-Run as a module from the project root:
-    python -m code.preprocessing.build_simulation_zones
-    python -m code.preprocessing.build_simulation_zones --city barcelona
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -33,9 +9,6 @@ from code.common.paths import DATA_DIR
 
 CITIES = ["madrid", "barcelona", "valencia"]
 
-# source filename stem -> tipo label.
-# The label is ALSO the name of the name-column inside the source file, as
-# written by fetch_neighborhood_boundaries.py. Keep both scripts in sync.
 SOURCES = {
     "limites_distritos": "district",
     "limites_barrios": "neighborhood",
@@ -53,9 +26,9 @@ def combine_city(city: str) -> None:
             continue
 
         gdf = gpd.read_file(path).to_crs(epsg=4326)
-        gdf = gdf.rename(columns={tipo: "zone"})   # district/neighborhood -> zona
+        gdf = gdf.rename(columns={tipo: "zona"})   # district/neighborhood -> zona
         gdf["tipo"] = tipo                          # "district" or "neighborhood"
-        parts.append(gdf[["zone", "type", "admin_level", "geometry"]])
+        parts.append(gdf[["zona", "tipo", "admin_level", "geometry"]])
 
     if not parts:
         raise ValueError(f"No boundary files found for {city}.")

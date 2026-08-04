@@ -15,6 +15,9 @@ cache/
 results/
 output/
 
+# QGIS visualisation files
+QGIS/
+
 # Logs
 *.log
 
@@ -34,6 +37,9 @@ venv/
 
 # Data
 data/osmr/
+data/osmr.zip
+data/osmr.zip:Zone.Identifier
+scripts/setup_osrm_city.sh
 
 # Notebooks
 code/notebooks/
