@@ -13,6 +13,9 @@ cache/
 results/
 output/
 
+# QGIS visualisation files
+QGIS/
+
 # Logs
 *.log
 
