@@ -13,15 +13,15 @@
 # snap points to: OSRM snaps coordinates to the network internally on every
 # /table or /route request.
 
-from dataclasses import dataclass
-
 import numpy as np
 import pandas as pd
 import requests
+from time import perf_counter
 import geopandas as gpd
 from shapely.geometry import Point
 
 from code.common.paths import DATA_DIR, PROJECT_ROOT
+from code.common.cost_utils import load_cost_parameters
 from code.routing.cws import clarke_wright_savings
 from code.routing.route_plan import OsrmRoutePlan
 from code.simulation.exporters import build_route_detail_rows
@@ -54,6 +54,14 @@ from code.common.routing_utils import (
     calculate_routes_matrix_cost,
 )
 
+from code.routing.config import RoutingAlgorithmConfig
+from code.routing.ils import iterated_local_search
+from code.simulation.traffic import (
+    TrafficProfile,
+    apply_traffic_profile,
+    load_traffic_profile,
+)
+
 def load_city_data(
     city: str,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -63,7 +71,7 @@ def load_city_data(
 
     centers_path = city_folder / "centros_cc.csv"
     boundaries_path = city_folder / "limites_zonas.geojson"
-    parameters_path = DATA_DIR / "parametros_modelos.csv"
+    parameters_path = DATA_DIR / "model_parameters.csv"
 
     required_paths = {
         "logistics centers": centers_path,
@@ -535,6 +543,7 @@ def calculate_microhub_last_mile(
     assigned_microhubs: pd.DataFrame,
     bike_capacity: float,
     neighborhood_name: str,
+    routing_config: RoutingAlgorithmConfig,
 ) -> tuple[float, float, int, float, list[dict]]:
     """
     Simulate bicycle delivery independently from every used microhub.
@@ -584,6 +593,13 @@ def calculate_microhub_last_mile(
             vehicle_capacity=bike_capacity,
             client_demands=customers["Demand"].to_numpy(dtype=float),
             route_start_time_per_route_min=BIKE_PREPARATION_TIME_PER_ROUTE_MIN,
+            routing_algorithm=routing_config.algorithm,
+            ils_max_iterations=routing_config.ils_max_iterations,
+            ils_max_iterations_without_improvement=(
+                routing_config.ils_max_iterations_without_improvement
+            ),
+            ils_perturbation_moves=routing_config.ils_perturbation_moves,
+            ils_random_seed=routing_config.ils_random_seed,
         )
 
         total_distance += plan.total_distance_km
@@ -619,6 +635,7 @@ def calculate_pudo_last_mile(
     assigned_pudos: pd.DataFrame,
     walking_capacity: float,
     neighborhood_name: str,
+    routing_config: RoutingAlgorithmConfig,
 ) -> tuple[float, float, int, float, int, list[dict]]:
     """
     Simulate walking delivery routes independently from every used PUDO.
@@ -671,6 +688,13 @@ def calculate_pudo_last_mile(
             vehicle_capacity=walking_capacity,
             client_demands=customers["Demand"].to_numpy(dtype=float),
             route_start_time_per_route_min=WALKING_PREPARATION_TIME_PER_ROUTE_MIN,
+            routing_algorithm=routing_config.algorithm,
+            ils_max_iterations=routing_config.ils_max_iterations,
+            ils_max_iterations_without_improvement=(
+                routing_config.ils_max_iterations_without_improvement
+            ),
+            ils_perturbation_moves=routing_config.ils_perturbation_moves,
+            ils_random_seed=routing_config.ils_random_seed,
         )
 
         total_distance += plan.total_distance_km
@@ -1170,6 +1194,12 @@ class CapacityAwareOsrmRouter:
         client_demands=None,
         max_route_duration_min: float | None = MAX_ROUTE_DURATION_MIN,
         route_start_time_per_route_min: float = 0.0,
+        routing_algorithm: str = "cws",
+        ils_max_iterations: int = 100,
+        ils_max_iterations_without_improvement: int | None = 20,
+        ils_perturbation_moves: int = 2,
+        ils_random_seed: int | None = 42,
+        traffic_profile: TrafficProfile | None = None,
     ) -> OsrmRoutePlan:
         distance_matrix, duration_matrix = self.get_matrices(
             depot_latitude=depot_latitude,
@@ -1177,16 +1207,102 @@ class CapacityAwareOsrmRouter:
             clients=clients,
             transport_mode=transport_mode,
         )
+        if transport_mode == "driving":
+            effective_traffic_profile = (
+                traffic_profile
+                if traffic_profile is not None
+                else TrafficProfile(
+                    name="baseline",
+                    duration_multiplier=1.0,
+                    source="baseline_osrm",
+                )
+            )
+        else:
+            effective_traffic_profile = TrafficProfile(
+                name="not_applied",
+                duration_multiplier=1.0,
+                source="traffic_not_applied_to_non_driving_mode",
+            )
 
-        total_distance_km, routes = clarke_wright_savings(
-            matrix=distance_matrix,
-            n_clients=len(clients),
-            vehicle_capacity=vehicle_capacity,
-            client_demands=client_demands,
-            duration_matrix=duration_matrix,
-            max_route_duration_min=max_route_duration_min,
-            route_start_time_per_route_min=route_start_time_per_route_min,
+        duration_matrix = apply_traffic_profile(
+            duration_matrix,
+            effective_traffic_profile,
         )
+
+        if routing_algorithm == "cws":
+            algorithm_start = perf_counter()
+            total_distance_km, routes = clarke_wright_savings(
+                matrix=distance_matrix,
+                n_clients=len(clients),
+                vehicle_capacity=vehicle_capacity,
+                client_demands=client_demands,
+                duration_matrix=duration_matrix,
+                max_route_duration_min=max_route_duration_min,
+                route_start_time_per_route_min=route_start_time_per_route_min,
+            )
+            routing_runtime_seconds = perf_counter() - algorithm_start
+            initial_distance_km = float(total_distance_km)
+
+        elif routing_algorithm == "ils":
+            # Build a separate CWS reference solution for an explicit and
+            # reproducible comparison. This baseline calculation is excluded
+            # from the reported ILS runtime; the ILS runtime itself includes
+            # its own CWS initialization and all local-search iterations.
+            initial_distance_km, _ = clarke_wright_savings(
+                matrix=distance_matrix,
+                n_clients=len(clients),
+                vehicle_capacity=vehicle_capacity,
+                client_demands=client_demands,
+                duration_matrix=duration_matrix,
+                max_route_duration_min=max_route_duration_min,
+                route_start_time_per_route_min=route_start_time_per_route_min,
+            )
+
+            algorithm_start = perf_counter()
+            total_distance_km, routes = iterated_local_search(
+                matrix=distance_matrix,
+                n_clients=len(clients),
+                vehicle_capacity=vehicle_capacity,
+                client_demands=client_demands,
+                duration_matrix=duration_matrix,
+                max_route_duration_min=max_route_duration_min,
+                route_start_time_per_route_min=route_start_time_per_route_min,
+                max_iterations=ils_max_iterations,
+                max_iterations_without_improvement=(
+                    ils_max_iterations_without_improvement
+                ),
+                perturbation_moves=ils_perturbation_moves,
+                random_seed=ils_random_seed,
+            )
+            routing_runtime_seconds = perf_counter() - algorithm_start
+
+        else:
+            raise ValueError(
+                "Unsupported routing algorithm: "
+                f"{routing_algorithm!r}. Expected 'cws' or 'ils'."
+            )
+
+        initial_distance_km = float(initial_distance_km)
+        total_distance_km = float(total_distance_km)
+        improvement_distance_km = max(
+            0.0,
+            initial_distance_km - total_distance_km,
+        )
+        improvement_percent = (
+            100.0 * improvement_distance_km / initial_distance_km
+            if initial_distance_km > 0.0
+            else 0.0
+        )
+
+        print(
+            f"Routing metrics [{routing_algorithm.upper()} | {transport_mode}]: "
+            f"initial={initial_distance_km:.3f} km | "
+            f"final={total_distance_km:.3f} km | "
+            f"improvement={improvement_distance_km:.3f} km "
+            f"({improvement_percent:.2f}%) | "
+            f"runtime={routing_runtime_seconds:.4f} s"
+        )
+            
         route_durations = calculate_route_durations(
             duration_matrix,
             routes,
@@ -1221,6 +1337,16 @@ class CapacityAwareOsrmRouter:
             route_loads=route_loads,
             route_start_time_per_route_min=float(route_start_time_per_route_min),
             service_time_min=service_time,
+            routing_algorithm=routing_algorithm,
+            routing_runtime_seconds=float(routing_runtime_seconds),
+            initial_distance_km=initial_distance_km,
+            improvement_distance_km=improvement_distance_km,
+            improvement_percent=improvement_percent,
+            traffic_profile=effective_traffic_profile.name,
+            traffic_duration_multiplier=(
+                effective_traffic_profile.duration_multiplier
+            ),
+            traffic_source=effective_traffic_profile.source,
         )
 
     def build_independent_round_trips(
@@ -1344,6 +1470,9 @@ def calculate_facility_supply_route(
     truck_capacity: float,
     facility_label: str,
     max_route_duration_min: float = MAX_ROUTE_DURATION_MIN,
+    *,
+    routing_config: RoutingAlgorithmConfig,
+    traffic_profile: TrafficProfile,
 ) -> tuple[OsrmRoutePlan, pd.DataFrame]:
     """Route logistics-center supply to every used facility.
 
@@ -1364,6 +1493,14 @@ def calculate_facility_supply_route(
             route_loads=[],
             route_start_time_per_route_min=TRUCK_LOADING_TIME_PER_ROUTE_MIN,
             service_time_min=0.0,
+            routing_algorithm=routing_config.algorithm,
+            routing_runtime_seconds=0.0,
+            initial_distance_km=0.0,
+            improvement_distance_km=0.0,
+            improvement_percent=0.0,
+            traffic_profile=traffic_profile.name,
+            traffic_duration_multiplier=traffic_profile.duration_multiplier,
+            traffic_source=traffic_profile.source,
         ), pd.DataFrame()
 
     supply_visits = expand_facility_supply_visits(
@@ -1386,6 +1523,14 @@ def calculate_facility_supply_route(
         client_demands=supply_visits["Demand"].to_numpy(dtype=float),
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=TRUCK_LOADING_TIME_PER_ROUTE_MIN,
+        routing_algorithm=routing_config.algorithm,
+        ils_max_iterations=routing_config.ils_max_iterations,
+        ils_max_iterations_without_improvement=(
+            routing_config.ils_max_iterations_without_improvement
+        ),
+        ils_perturbation_moves=routing_config.ils_perturbation_moves,
+        ils_random_seed=routing_config.ils_random_seed,
+        traffic_profile=traffic_profile,
     )
 
     print(
@@ -1407,9 +1552,12 @@ def simulate_neighborhood(
     assigned_microhubs: pd.DataFrame,
     centers: pd.DataFrame,
     parameters: dict,
+    cost_parameters: dict[str, float],
     *,
     osrm_host: str,
     osrm_profile: str,
+    routing_config: RoutingAlgorithmConfig,
+    traffic_profile: TrafficProfile,
 ):
     """Run the five models using demand stops and classified facilities."""
 
@@ -1441,6 +1589,14 @@ def simulate_neighborhood(
         vehicle_capacity=parameters["FURGONETA_CONV"]["capacidad"],
         client_demands=client_demands,
         route_start_time_per_route_min=DIRECT_VAN_LOADING_TIME_PER_ROUTE_MIN,
+        routing_algorithm=routing_config.algorithm,
+        ils_max_iterations=routing_config.ils_max_iterations,
+        ils_max_iterations_without_improvement=(
+            routing_config.ils_max_iterations_without_improvement
+        ),
+        ils_perturbation_moves=routing_config.ils_perturbation_moves,
+        ils_random_seed=routing_config.ils_random_seed,
+        traffic_profile=traffic_profile,
     )
     m2_plan = route_planner.build_capacity_plan(
         depot_latitude=direct_cc_lat,
@@ -1450,6 +1606,14 @@ def simulate_neighborhood(
         vehicle_capacity=parameters["FURGONETA_ELEC"]["capacidad"],
         client_demands=client_demands,
         route_start_time_per_route_min=DIRECT_VAN_LOADING_TIME_PER_ROUTE_MIN,
+        routing_algorithm=routing_config.algorithm,
+        ils_max_iterations=routing_config.ils_max_iterations,
+        ils_max_iterations_without_improvement=(
+            routing_config.ils_max_iterations_without_improvement
+        ),
+        ils_perturbation_moves=routing_config.ils_perturbation_moves,
+        ils_random_seed=routing_config.ils_random_seed,
+        traffic_profile=traffic_profile,
     )
 
     # Direct models have no separate trunk leg: CWS includes CC departures/returns.
@@ -1474,6 +1638,8 @@ def simulate_neighborhood(
         used_facilities=used_microhubs,
         truck_capacity=parameters["FURGONETA_CONV"]["capacidad"],
         facility_label="M3",
+        routing_config=routing_config,
+        traffic_profile=traffic_profile,
     )
 
     (
@@ -1487,6 +1653,7 @@ def simulate_neighborhood(
         assigned_microhubs=assigned_microhubs,
         bike_capacity=parameters["BICICLETA_CARGO"]["capacidad"],
         neighborhood_name=neighborhood_name,
+        routing_config=routing_config,
     )
 
     used_microhub_count = len(used_microhubs)
@@ -1506,6 +1673,8 @@ def simulate_neighborhood(
         used_facilities=used_pudos,
         truck_capacity=parameters["FURGONETA_CONV"]["capacidad"],
         facility_label="M4/M5",
+        routing_config=routing_config,
+        traffic_profile=traffic_profile,
     )
     (
         m4_distance_km,
@@ -1519,6 +1688,7 @@ def simulate_neighborhood(
         assigned_pudos=assigned_pudos,
         walking_capacity=parameters["PUDO_A_PIE"]["capacidad"],
         neighborhood_name=neighborhood_name,
+        routing_config=routing_config,
     )
     (
         customer_travel_km,
@@ -1532,14 +1702,14 @@ def simulate_neighborhood(
 
     print(f"Demand: {customer_count} customers, {package_count} packages")
     print(
-            f"M1 CWS driving: "
+            f"M1 {routing_config.algorithm.upper()} driving: "
             f"{m1_plan.route_count} routes | "
             f"{m1_plan.total_distance_km:.2f} km | "
             f"total={m1_plan.total_duration_min:.1f} min | "
             f"max={m1_plan.max_route_duration_min:.1f} min"
         )
     print(
-            f"M2 CWS driving: "
+            f"M2 {routing_config.algorithm.upper()} driving: "
             f"{m2_plan.route_count} routes | "
             f"{m2_plan.total_distance_km:.2f} km | "
             f"total={m2_plan.total_duration_min:.1f} min | "
@@ -1646,6 +1816,7 @@ def simulate_neighborhood(
             package_count=package_count,
             route_plan=m1_plan,
             parameters=parameters,
+            cost_parameters=cost_parameters,
         ),
         simulate_m2(
             city=city,
@@ -1655,6 +1826,7 @@ def simulate_neighborhood(
             package_count=package_count,
             route_plan=m2_plan,
             parameters=parameters,
+            cost_parameters=cost_parameters,
         ),
         simulate_m3(
             city=city,
@@ -1662,11 +1834,13 @@ def simulate_neighborhood(
             selected_cc=m3_cc,
             last_mile_point=microhub_point,
             package_count=package_count,
+            used_microhub_count=used_microhub_count,
             supply_plan=m3_supply_plan,
             bike_distance_km=m3_bike_distance_km,
             bike_duration_min=m3_bike_duration_min,
             bike_route_count=m3_bike_route_count,
             parameters=parameters,
+            cost_parameters=cost_parameters,
         ),
         simulate_m4(
             city=city,
@@ -1674,11 +1848,13 @@ def simulate_neighborhood(
             selected_cc=pudo_cc,
             last_mile_point=pudo_point,
             package_count=package_count,
+            used_pudo_count=m4_used_pudo_count,
             supply_plan=pudo_supply_plan,
             walking_distance_km=m4_distance_km,
             walking_duration_min=m4_duration_min,
             walking_route_count=m4_route_count,
             parameters=parameters,
+            cost_parameters=cost_parameters,
         ),
         simulate_m5(
             city=city,
@@ -1687,9 +1863,12 @@ def simulate_neighborhood(
             last_mile_point=pudo_point,
             package_count=package_count,
             customer_count=customer_count,
+            used_pudo_count=len(used_pudos),
             supply_plan=pudo_supply_plan,
             customer_travel_km=customer_travel_km,
+            customer_travel_min=customer_travel_min,
             parameters=parameters,
+            cost_parameters=cost_parameters,
         ),
     ]
 
@@ -1763,6 +1942,9 @@ def simulate_city(
     *,
     osrm_host: str,
     osrm_profile: str,
+    routing_config: RoutingAlgorithmConfig,
+    traffic_profile: TrafficProfile,
+    cost_parameters: dict[str, float],
 ):
     centers, boundaries, parameters_df = load_city_data(city)
     demand_instance = load_demand_instance(city, demand_scenario, instance_size)
@@ -1814,28 +1996,13 @@ def simulate_city(
             neighborhood,
         )
 
-        def load_model_parameters() -> pd.DataFrame:
-            """
-            Load model parameters indexed by model name.
-            """
+        microhub_capacity = float(
+            parameters["MICROHUB"]["capacidad"]
+        )
 
-            parameters = pd.read_csv(
-                DATA_DIR / "parametros_modelos.csv"
-            )
-
-            return parameters.set_index("modelo")
-
-        model_parameters = load_model_parameters()
-
-        microhub_capacity = model_parameters.loc[
-            "MICROHUB",
-            "capacidad",
-        ]
-
-        pudo_capacity = model_parameters.loc[
-            "PUDO",
-            "capacidad",
-        ]
+        pudo_capacity = float(
+        parameters["PUDO"]["capacidad"]
+    )
  
         if neighborhood_microhubs.empty:
             neighborhood_microhubs = microhubs
@@ -1872,8 +2039,11 @@ def simulate_city(
             assigned_microhubs=assigned_microhubs,
             centers=centers,
             parameters=parameters,
+            cost_parameters=cost_parameters,
             osrm_host=osrm_host,
             osrm_profile=osrm_profile,
+            routing_config=routing_config,
+            traffic_profile=traffic_profile,
         )
  
         all_results.extend(results)
@@ -1937,6 +2107,66 @@ def parse_arguments() -> argparse.Namespace:
             "Default: driving."
         ),
     )
+    
+    parser.add_argument(
+        "--routing-algorithm",
+        choices=["cws", "ils"],
+        default="cws",
+        help=(
+            "Routing algorithm used to construct capacity-aware routes. "
+            "Default: cws."
+        ),
+    )
+    
+    parser.add_argument(
+        "--ils-max-iterations",
+        type=int,
+        default=100,
+        help="Maximum number of ILS iterations. Default: 100.",
+    )
+
+    parser.add_argument(
+        "--ils-max-no-improvement",
+        type=int,
+        default=20,
+        help=(
+            "Stop ILS after this number of iterations without improvement. "
+            "Default: 20."
+        ),
+    )
+
+    parser.add_argument(
+        "--ils-perturbation-moves",
+        type=int,
+        default=2,
+        help="Number of perturbation moves per ILS iteration. Default: 2.",
+    )
+
+    parser.add_argument(
+        "--ils-random-seed",
+        type=int,
+        default=42,
+        help="Random seed used by ILS. Default: 42.",
+    )
+    
+    parser.add_argument(
+        "--traffic-profile",
+        default="baseline",
+        help=(
+            "Traffic profile loaded from data/traffic_profiles.csv. "
+            "Default: baseline."
+        ),
+    )
+
+    parser.add_argument(
+        "--traffic-multiplier",
+        type=float,
+        default=None,
+        help=(
+            "Optional multiplier overriding the selected CSV traffic profile. "
+            "Useful for sensitivity tests."
+        ),
+    )
 
     return parser.parse_args()
 
@@ -1944,7 +2174,16 @@ def parse_arguments() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_arguments()
 
+    routing_config = RoutingAlgorithmConfig(
+        algorithm=args.routing_algorithm,
+        ils_max_iterations=args.ils_max_iterations,
+        ils_max_iterations_without_improvement=args.ils_max_no_improvement,
+        ils_perturbation_moves=args.ils_perturbation_moves,
+        ils_random_seed=args.ils_random_seed,
+    )
+
     if args.city == "all" and args.zones is not None:
+
         raise SystemExit(
             "Error: --zones cannot be used together with --city all."
         )
@@ -1956,8 +2195,18 @@ if __name__ == "__main__":
 
     RESULTS_FOLDER.mkdir(parents=True, exist_ok=True)
 
+    cost_parameters = load_cost_parameters(
+        DATA_DIR / "cost_parameters.csv"
+    )
+
     for active_city in cities:
         active_host = get_osrm_host(active_city, active_profile)
+        traffic_profile = load_traffic_profile(
+            csv_path=DATA_DIR / "traffic_profiles.csv",
+            profile_name=args.traffic_profile,
+            city=active_city,
+            multiplier_override=args.traffic_multiplier,
+        )
 
         print("\n" + "=" * 60)
         print("OSRM-BASED LOGISTICS SIMULATION")
@@ -1966,6 +2215,13 @@ if __name__ == "__main__":
         print(f"Neighborhood: {active_zones}")
         print(f"OSRM host: {active_host}")
         print(f"OSRM profile: {active_profile}")
+        print(f"Routing algorithm: {routing_config.algorithm.upper()}")
+        print(
+            "Traffic profile: "
+            f"{traffic_profile.name} "
+            f"(x{traffic_profile.duration_multiplier:.3f}, "
+            f"source={traffic_profile.source})"
+        )
         print("=" * 60)
 
         check_osrm_server(
@@ -1983,10 +2239,39 @@ if __name__ == "__main__":
             active_zones=active_zones,
             osrm_host=active_host,
             osrm_profile=active_profile,
+            routing_config=routing_config,
+            traffic_profile=traffic_profile,
+            cost_parameters=cost_parameters,
         )
 
+        results_df["routing_algorithm"] = routing_config.algorithm
+        results_df["traffic_profile"] = traffic_profile.name
+        results_df["traffic_duration_multiplier"] = (
+            traffic_profile.duration_multiplier
+        )
+        results_df["traffic_source"] = traffic_profile.source
+
+        model_detail_frames = {
+            model_code: detail_df.assign(
+                routing_algorithm=routing_config.algorithm,
+                selected_traffic_profile=traffic_profile.name,
+            )
+            for model_code, detail_df in model_detail_frames.items()
+        }
+
+        zone_suffix = ""
+
+        if active_zones:
+            normalized_zones = "_".join(
+                str(zone).strip().replace(" ", "_")
+                for zone in active_zones
+            )
+            zone_suffix = f"_{normalized_zones}"
+
         output_filename = (
-            f"resultados_osrm_{active_city}_{args.demand_scenario}_{args.instance_size}.csv"
+            f"resultados_osrm_{active_city}{zone_suffix}_"
+            f"{args.demand_scenario}_{args.instance_size}_"
+            f"{routing_config.algorithm}_{traffic_profile.name}.csv"
         )
 
         output_path = RESULTS_FOLDER / output_filename
@@ -2001,7 +2286,10 @@ if __name__ == "__main__":
             RESULTS_FOLDER
             / active_city
             / "simulation_details"
-            / f"{args.demand_scenario}_{args.instance_size}"
+            / (
+                f"{args.demand_scenario}_{args.instance_size}_"
+                f"{routing_config.algorithm}_{traffic_profile.name}"
+            )
         )
         detail_output_folder.mkdir(parents=True, exist_ok=True)
 
