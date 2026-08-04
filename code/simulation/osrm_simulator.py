@@ -17,6 +17,8 @@ import numpy as np
 import pandas as pd
 import requests
 from time import perf_counter
+import geopandas as gpd
+from shapely.geometry import Point
 
 from code.common.paths import DATA_DIR, PROJECT_ROOT
 from code.common.cost_utils import load_cost_parameters
@@ -68,7 +70,7 @@ def load_city_data(
     city_folder = DATA_DIR / city
 
     centers_path = city_folder / "centros_cc.csv"
-    boundaries_path = city_folder / "limites_barrios.csv"
+    boundaries_path = city_folder / "limites_zonas.geojson"
     parameters_path = DATA_DIR / "model_parameters.csv"
 
     required_paths = {
@@ -90,7 +92,9 @@ def load_city_data(
         )
 
     centers = pd.read_csv(centers_path)
-    boundaries = pd.read_csv(boundaries_path)
+    boundaries = gpd.read_file(boundaries_path)
+    if boundaries.crs is not None and boundaries.crs.to_epsg() != 4326:
+        boundaries = boundaries.to_crs(epsg=4326)   
     parameters = pd.read_csv(parameters_path)
 
     validate_required_columns(
@@ -100,10 +104,8 @@ def load_city_data(
     )
     validate_required_columns(
         boundaries,
-        required_columns={
-            "barrio", "lat_min", "lat_max", "lon_min", "lon_max"
-        },
-        dataset_name=f"{city} neighborhood boundaries",
+        required_columns={"zona", "tipo", "geometry"},
+        dataset_name=f"{city} zones",
     )
     validate_required_columns(
         parameters,
@@ -179,21 +181,30 @@ def calculate_demand_weighted_centroid(records: pd.DataFrame) -> OperationalPoin
     )
 
 
+## HERE IS USING ALL PUDOS FOR EACH CLIENT RIGHT NOW, MATRIZ TAKES A LONG TIME TO CALCULATE
+
 def assign_customers_to_nearest_facility(
     customers: pd.DataFrame,
     facilities: pd.DataFrame,
+    *,
+    osrm_host: str,
+    osrm_profile: str,
+    facility_capacity: float,
     facility_name_column: str = "Location",
 ) -> pd.DataFrame:
     """
-    Assign every customer independently to the nearest facility.
+    Assign each customer to the nearest facility using OSRM road distances.
 
-    Capacity constraints are ignored.
-    If two facilities are equally distant, the first one is selected.
+    Facilities are considered in order of increasing road distance. If the
+    nearest facility has reached its capacity, the next closest facility is
+    considered.
+
+    Facility capacity is measured as the cumulative assigned demand.
     """
 
     validate_required_columns(
         customers,
-        {"Latitude", "Longitude"},
+        {"Latitude", "Longitude", "Demand"},
         "customers",
     )
 
@@ -208,24 +219,41 @@ def assign_customers_to_nearest_facility(
             "No facilities were provided for customer assignment."
         )
 
-    customer_coords = customers[
-        ["Longitude", "Latitude"]
-    ].to_numpy(dtype=float)
+    # ------------------------------------------------------------
+    # Compute OSRM customer -> facility distance matrix
+    # ------------------------------------------------------------
 
-    facility_coords = facilities[
-        ["Longitude", "Latitude"]
-    ].to_numpy(dtype=float)
-
-    diff = (
-        customer_coords[:, None, :]
-        - facility_coords[None, :, :]
+    print(
+        f"Customers: {len(customers)}, "
+        f"Facilities: {len(facilities)}"
     )
 
-    squared_distance = np.sum(diff ** 2, axis=2)
+    coords = (
+        list(zip(customers["Longitude"], customers["Latitude"]))
+        + list(zip(facilities["Longitude"], facilities["Latitude"]))
+    )
 
-    nearest = np.argmin(squared_distance, axis=1)
+    distance_matrix, _ = osrm_distance_duration_table(
+        coords,
+        host=osrm_host,
+        profile=osrm_profile,
+    )
 
-    assigned = customers.copy()
+    customer_count = len(customers)
+
+    facility_distances = distance_matrix[
+        :customer_count,
+        customer_count:,
+    ]
+
+    ordered_facilities = np.argsort(
+        facility_distances,
+        axis=1,
+    )
+
+    # ------------------------------------------------------------
+    # Facility names
+    # ------------------------------------------------------------
 
     facility_names = (
         facilities[facility_name_column]
@@ -252,22 +280,82 @@ def assign_customers_to_nearest_facility(
         fallback_names,
     )
 
-    assigned["assigned_facility"] = (
-        facility_names.iloc[nearest]
-        .to_numpy()
+    # ------------------------------------------------------------
+    # Assignment
+    # ------------------------------------------------------------
+
+    facility_load = np.zeros(
+        len(facilities),
+        dtype=float,
     )
 
-    assigned["facility_latitude"] = (
-        facilities.iloc[nearest]["Latitude"]
-        .to_numpy()
+    assigned_facility = np.empty(
+        customer_count,
+        dtype=object,
     )
 
-    assigned["facility_longitude"] = (
-        facilities.iloc[nearest]["Longitude"]
-        .to_numpy()
+    assigned_latitude = np.empty(
+        customer_count,
+        dtype=float,
     )
 
+    assigned_longitude = np.empty(
+        customer_count,
+        dtype=float,
+    )
+
+    for customer_idx in range(customer_count):
+
+        demand = float(
+            customers.iloc[customer_idx]["Demand"]
+        )
+
+        assigned = False
+
+        for facility_idx in ordered_facilities[customer_idx]:
+
+            if (
+                facility_load[facility_idx] + demand
+                <= facility_capacity
+            ):
+
+                facility = facilities.iloc[facility_idx]
+
+                assigned_facility[customer_idx] = (
+                    facility_names.iloc[facility_idx]
+                )
+
+                assigned_latitude[customer_idx] = (
+                    facility["Latitude"]
+                )
+
+                assigned_longitude[customer_idx] = (
+                    facility["Longitude"]
+                )
+
+                facility_load[facility_idx] += demand
+
+                assigned = True
+                break
+
+        if not assigned:
+
+            raise ValueError(
+                f"No facility with enough remaining capacity "
+                f"for customer {customer_idx}."
+            )
+
+    # ------------------------------------------------------------
+    # Output
+    # ------------------------------------------------------------
+
+    assigned = customers.copy()
+
+    assigned["assigned_facility"] = assigned_facility
+    assigned["facility_latitude"] = assigned_latitude
+    assigned["facility_longitude"] = assigned_longitude
     assigned["assigned_demand"] = assigned["Demand"]
+
     return assigned
 
 
@@ -650,28 +738,17 @@ def get_parameters(parameters: pd.DataFrame) -> dict:
     )
 
 
-def filter_points_by_neighborhood(
-    points: pd.DataFrame,
-    neighborhood: pd.Series,
-) -> pd.DataFrame:
-    """Filter geographical points using a neighborhood bounding box."""
-
+def filter_points_by_neighborhood(points: pd.DataFrame, neighborhood) -> pd.DataFrame:
+    """Filter points that fall inside the zone polygon."""
     validate_required_columns(
-        points,
-        required_columns={"Latitude", "Longitude"},
-        dataset_name="geographical points",
+        points, {"Latitude", "Longitude"}, "geographical points",
     )
-
-    return points[
-        points["Latitude"].between(
-            neighborhood["lat_min"],
-            neighborhood["lat_max"],
-        )
-        & points["Longitude"].between(
-            neighborhood["lon_min"],
-            neighborhood["lon_max"],
-        )
-    ].copy()
+    polygon = neighborhood["geometry"]
+    inside = points.apply(
+        lambda row: polygon.contains(Point(row["Longitude"], row["Latitude"])),
+        axis=1,
+    )
+    return points[inside].copy()
 
 
 def get_osrm_host(city: str, profile: str) -> str:
@@ -1798,11 +1875,70 @@ def simulate_neighborhood(
     return summary_results, model_details
 
 
+def select_zones(boundaries, requested):
+    """
+    Select simulation zones by name, level-agnostic.
+    """
+ 
+    available_names = sorted(boundaries["zona"].tolist())
+    selected = []
+ 
+    for token in requested:
+        if ":" in token:
+            raw_name, raw_tipo = token.rsplit(":", 1)
+            name = raw_name.strip().lower()
+            tipo = raw_tipo.strip().lower()
+            match = boundaries[
+                (boundaries["zona"].str.lower() == name)
+                & (boundaries["tipo"].str.lower() == tipo)
+            ]
+            label = token
+        else:
+            name = token.strip().lower()
+            match = boundaries[boundaries["zona"].str.lower() == name]
+            label = token
+ 
+        if match.empty:
+            raise ValueError(
+                f"Zone not found: '{label}'. "
+                f"Availables: {available_names}"
+            )
+ 
+        if len(match) > 1:
+            tipos = ", ".join(sorted(match["tipo"].str.lower().unique()))
+            raise ValueError(
+                f"'{label}' is ambiguous (exists as: {tipos}). "
+                f"Specify it as '{token}:district' o '{token}:neighborhood'."
+            )
+ 
+        selected.append(match)
+ 
+    return gpd.GeoDataFrame(
+        pd.concat(selected, ignore_index=True),
+        crs=boundaries.crs,
+    )
+ 
+ 
+def warn_zone_overlaps(zones):
+    """Warn when one selected zone contains another (double-counted demand)."""
+ 
+    for _, outer in zones.iterrows():
+        for _, inner in zones.iterrows():
+            if outer["zona"] == inner["zona"] and outer["tipo"] == inner["tipo"]:
+                continue
+            if outer.geometry.contains(inner.geometry.centroid):
+                print(
+                    f"'{inner['zona']}' ({inner['tipo']}) is inside of "
+                    f"'{outer['zona']}' ({outer['tipo']}): the demand "
+                    f"is counted two times."
+                )
+ 
+ 
 def simulate_city(
     city: str,
     demand_scenario: str,
     instance_size: int,
-    active_neighborhood: str | None = None,
+    active_zones: list[str] | None = None,
     *,
     osrm_host: str,
     osrm_profile: str,
@@ -1813,37 +1949,32 @@ def simulate_city(
     centers, boundaries, parameters_df = load_city_data(city)
     demand_instance = load_demand_instance(city, demand_scenario, instance_size)
     classified_locations = load_classified_locations(city)
-    microhubs, pudos = load_facility_candidates(
-            classified_locations
-        )
-
+    microhubs, pudos = load_facility_candidates(classified_locations)
+ 
     print(
         f"Available facilities: "
         f"{len(microhubs)} microhubs, "
         f"{len(pudos)} PUDOs"
     )
     parameters = get_parameters(parameters_df)
-
+ 
     all_results = []
     all_model_details = {model: [] for model in ("M1", "M2", "M3", "M4", "M5")}
-    if active_neighborhood is not None:
-        boundaries = boundaries[
-            boundaries["barrio"].str.lower() == active_neighborhood.lower()
-        ]
-        if boundaries.empty:
-            raise ValueError(
-                f"Neighborhood '{active_neighborhood}' was not found in {city}."
-            )
-
+ 
+    if active_zones is not None:
+        boundaries = select_zones(boundaries, active_zones)
+        warn_zone_overlaps(boundaries)
+ 
     for _, neighborhood in boundaries.iterrows():
-        neighborhood_name = neighborhood["barrio"]
-        print(f"\n📍 Simulating {city.upper()} - {neighborhood_name}")
-
+        neighborhood_name = neighborhood["zona"]
+        zone_type = neighborhood["tipo"]
+        print(f"\nSimulating {city.upper()} - {neighborhood_name} ({zone_type})")
+ 
         demand_points = filter_points_by_neighborhood(demand_instance, neighborhood)
         if demand_points.empty:
-            print(f"⚠️ No demand stops within {neighborhood_name}.")
+            print(f"No demand stops within {neighborhood_name}.")
             continue
-
+ 
         demand_centroid = calculate_demand_weighted_centroid(demand_points)
         microhub_point = select_operational_point(
             strategy="nearest_microhub_facility",
@@ -1859,31 +1990,44 @@ def simulate_city(
             target_latitude=demand_centroid.latitude,
             target_longitude=demand_centroid.longitude,
         )
-        
+ 
         neighborhood_microhubs = filter_points_by_neighborhood(
             microhubs,
             neighborhood,
         )
 
+        microhub_capacity = float(
+            parameters["MICROHUB"]["capacidad"]
+        )
+
+        pudo_capacity = float(
+        parameters["PUDO"]["capacidad"]
+    )
+ 
         if neighborhood_microhubs.empty:
             neighborhood_microhubs = microhubs
-
+ 
         assigned_microhubs = assign_customers_to_nearest_facility(
-            demand_points,
-            neighborhood_microhubs,
+            customers=demand_points,
+            facilities=neighborhood_microhubs,
+            osrm_host=osrm_host,
+            osrm_profile="cycling",
+            facility_capacity=microhub_capacity,
         )
-        
+ 
         print(
             f"Neighborhood microhubs: {len(neighborhood_microhubs)}, "
             f"used: {assigned_microhubs['assigned_facility'].nunique()}"
         )
-
+ 
         assigned_pudos = assign_customers_to_nearest_facility(
-            demand_points,
-            pudos,
+            customers=demand_points,
+            facilities=pudos,
+            osrm_host=osrm_host,
+            osrm_profile="walking",
+            facility_capacity=pudo_capacity,
         )
-        
-        
+ 
         results, model_details = simulate_neighborhood(
             city=city,
             neighborhood_name=neighborhood_name,
@@ -1901,16 +2045,15 @@ def simulate_city(
             routing_config=routing_config,
             traffic_profile=traffic_profile,
         )
-        
-        assigned_pudos.groupby("assigned_facility").size().value_counts().sort_index()
+ 
         all_results.extend(results)
         for model_code, detail_rows in model_details.items():
             all_model_details[model_code].extend(detail_rows)
         print(
-            f"✅ {neighborhood_name}: {len(demand_points)} customers, "
+            f"{neighborhood_name} ({zone_type}): {len(demand_points)} customers, "
             f"{int(demand_points['Demand'].sum())} packages simulated"
         )
-
+ 
     return (
         pd.DataFrame(all_results),
         {
@@ -1924,8 +2067,6 @@ def parse_arguments() -> argparse.Namespace:
         description="Run the OSRM-based logistics simulator."
     )
 
-    
-
     parser.add_argument(
         "--city",
         choices=CITIES + ["all"],
@@ -1934,11 +2075,12 @@ def parse_arguments() -> argparse.Namespace:
     )
     
     parser.add_argument(
-        "--neighborhood",
+        "--zones",
+        nargs="+",
         default=None,
         help=(
-            "Neighborhood to simulate. "
-            "If omitted, all neighborhoods are processed."
+            "Names of zones to simulate"
+            "If it is omitted, all the zones of the file are processed"
         ),
     )
 
@@ -2040,13 +2182,14 @@ if __name__ == "__main__":
         ils_random_seed=args.ils_random_seed,
     )
 
-    if args.city == "all" and args.neighborhood is not None:
+    if args.city == "all" and args.zones is not None:
+
         raise SystemExit(
-            "Error: --neighborhood cannot be used together with --city all."
+            "Error: --zones cannot be used together with --city all."
         )
 
     active_profile = args.profile
-    active_neighborhood = args.neighborhood
+    active_zones = args.zones
 
     cities = CITIES if args.city == "all" else [args.city]
 
@@ -2069,7 +2212,7 @@ if __name__ == "__main__":
         print("OSRM-BASED LOGISTICS SIMULATION")
         print("=" * 60)
         print(f"City: {active_city}")
-        print(f"Neighborhood: {active_neighborhood}")
+        print(f"Neighborhood: {active_zones}")
         print(f"OSRM host: {active_host}")
         print(f"OSRM profile: {active_profile}")
         print(f"Routing algorithm: {routing_config.algorithm.upper()}")
@@ -2093,7 +2236,7 @@ if __name__ == "__main__":
             city=active_city,
             demand_scenario=args.demand_scenario,
             instance_size=args.instance_size,
-            active_neighborhood=active_neighborhood,
+            active_zones=active_zones,
             osrm_host=active_host,
             osrm_profile=active_profile,
             routing_config=routing_config,
@@ -2116,16 +2259,19 @@ if __name__ == "__main__":
             for model_code, detail_df in model_detail_frames.items()
         }
 
-        output_filename = (
-            f"resultados_osrm_{active_city}_{args.demand_scenario}_"
-            f"{args.instance_size}_{routing_config.algorithm}_"
-            f"{traffic_profile.name}.csv"
-            if active_neighborhood is None
-            else (
-                f"resultados_osrm_{active_city}_{active_neighborhood}_"
-                f"{args.demand_scenario}_{args.instance_size}_"
-                f"{routing_config.algorithm}_{traffic_profile.name}.csv"
+        zone_suffix = ""
+
+        if active_zones:
+            normalized_zones = "_".join(
+                str(zone).strip().replace(" ", "_")
+                for zone in active_zones
             )
+            zone_suffix = f"_{normalized_zones}"
+
+        output_filename = (
+            f"resultados_osrm_{active_city}{zone_suffix}_"
+            f"{args.demand_scenario}_{args.instance_size}_"
+            f"{routing_config.algorithm}_{traffic_profile.name}.csv"
         )
 
         output_path = RESULTS_FOLDER / output_filename
