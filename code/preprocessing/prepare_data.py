@@ -421,7 +421,7 @@ def export_neighborhood_boundaries(output_dir: Path) -> None:
 
 
 def export_model_parameters(output_dir: Path) -> None:
-    output_file = output_dir / "parametros_modelos.csv"
+    output_file = output_dir / "model_parameters.csv"
 
     pd.DataFrame(MODEL_PARAMETERS).to_csv(
         output_file,
