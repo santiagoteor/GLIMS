@@ -1,7 +1,7 @@
 import pandas as pd
 
 from code.common.constants import SERVICE_TIME_PER_STOP_MIN
-from code.simulation.models import OsrmRoutePlan
+from code.routing.route_plan import OsrmRoutePlan
 
 
 def build_route_detail_rows(
@@ -53,6 +53,16 @@ def build_route_detail_rows(
                 "duration_min": plan.route_durations_min[route_number - 1],
                 "start_handling_min": plan.route_start_time_per_route_min,
                 "stop_service_min": len(route) * SERVICE_TIME_PER_STOP_MIN,
+                "routing_algorithm": plan.routing_algorithm,
+                "routing_runtime_seconds": plan.routing_runtime_seconds,
+                "initial_distance_km": plan.initial_distance_km,
+                "improvement_distance_km": plan.improvement_distance_km,
+                "improvement_percent": plan.improvement_percent,
+                "traffic_profile": plan.traffic_profile,
+                "traffic_duration_multiplier": (
+                    plan.traffic_duration_multiplier
+                ),
+                "traffic_source": plan.traffic_source,
                 "stop_sequence": " -> ".join(stop_labels),
             }
         )

@@ -1,9 +1,11 @@
 ﻿# Python
 __pycache__/
 *.py[cod]
+**/__pycache__/
 
 # Jupyter
 .ipynb_checkpoints/
+*.ipynb
 
 # Cache
 code/cache/
@@ -33,17 +35,20 @@ venv/
 # PyCharm
 .idea/
 
+# Data
 data/osmr/
+
+# Notebooks
 code/notebooks/
+*.ipynb
+
+# Old simulators
+code/simulation/osmnx_simulator.py
+code/simulation/simulator.py
+
+# Internal documentation
+docs/docs_mar_san/
 
 # Operating system
 .DS_Store
 Thumbs.db
-
-# Documents
-.docs\docs_mar_san
-
-data/osmr.zip
-data/osmr.zip:Zone.Identifier
-scripts/setup_osrm_city.sh
-    

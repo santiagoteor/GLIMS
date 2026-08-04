@@ -1,0 +1,459 @@
+import numpy as np
+import pandas as pd
+
+from code.common.constants import MAX_ROUTE_DURATION_MIN, SERVICE_TIME_PER_STOP_MIN, TRUCK_LOADING_TIME_PER_ROUTE_MIN
+from code.common.routing_utils import calculate_route_durations, calculate_route_loads, calculate_routes_matrix_cost
+from code.routing.config import RoutingAlgorithmConfig
+from code.routing.cws import clarke_wright_savings
+from code.routing.ils import iterated_local_search
+from code.routing.osrm_client import get_osrm_host, osrm_distance_duration_table, osrm_table
+from code.routing.route_plan import OsrmRoutePlan
+from code.common.data_utils import validate_required_columns
+from code.simulation.traffic import TrafficProfile, apply_traffic_profile
+from time import perf_counter
+
+class CapacityAwareOsrmRouter:
+    """
+    Generic OSRM-backed planner for driving, cycling, and walking routes.
+
+    OSRM supplies mode-specific distance and duration matrices. Clarke-Wright
+    then creates routes subject to the supplied vehicle or courier capacity.
+    """
+
+    def __init__(self, city: str):
+        self.city = city
+        self._last_matrix_key = None
+        self._last_matrices = None
+
+    def get_matrices(
+        self,
+        depot_latitude: float,
+        depot_longitude: float,
+        clients: pd.DataFrame,
+        transport_mode: str,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        coords = [(depot_longitude, depot_latitude)] + list(
+            zip(clients["Longitude"], clients["Latitude"])
+        )
+
+        print(
+            f"\nQuerying OSRM /table for {len(coords)} points "
+            f"using {transport_mode}..."
+        )
+
+        matrix_key = (
+            transport_mode,
+            tuple((round(float(lon), 6), round(float(lat), 6)) for lon, lat in coords),
+        )
+
+        if matrix_key == self._last_matrix_key and self._last_matrices is not None:
+            print(
+                "Reusing the previous OSRM distance and duration matrices "
+                f"for {transport_mode}."
+            )
+            return self._last_matrices
+
+        osrm_host = get_osrm_host(self.city, transport_mode)
+        distance_matrix, duration_matrix = osrm_distance_duration_table(
+            coords,
+            host=osrm_host,
+            profile=transport_mode,
+        )
+
+        self._last_matrix_key = matrix_key
+        self._last_matrices = (distance_matrix, duration_matrix)
+
+        print(
+            "Distance and duration matrices received from OSRM "
+            f"for {transport_mode}."
+        )
+
+        return distance_matrix, duration_matrix
+
+    def build_capacity_plan(
+        self,
+        *,
+        depot_latitude: float,
+        depot_longitude: float,
+        clients: pd.DataFrame,
+        transport_mode: str,
+        vehicle_capacity: float,
+        client_demands=None,
+        max_route_duration_min: float | None = MAX_ROUTE_DURATION_MIN,
+        route_start_time_per_route_min: float = 0.0,
+        routing_algorithm: str = "cws",
+        ils_max_iterations: int = 100,
+        ils_max_iterations_without_improvement: int | None = 20,
+        ils_perturbation_moves: int = 2,
+        ils_random_seed: int | None = 42,
+        traffic_profile: TrafficProfile | None = None,
+    ) -> OsrmRoutePlan:
+        distance_matrix, duration_matrix = self.get_matrices(
+            depot_latitude=depot_latitude,
+            depot_longitude=depot_longitude,
+            clients=clients,
+            transport_mode=transport_mode,
+        )
+        if transport_mode == "driving":
+            effective_traffic_profile = (
+                traffic_profile
+                if traffic_profile is not None
+                else TrafficProfile(
+                    name="baseline",
+                    duration_multiplier=1.0,
+                    source="baseline_osrm",
+                )
+            )
+        else:
+            effective_traffic_profile = TrafficProfile(
+                name="not_applied",
+                duration_multiplier=1.0,
+                source="traffic_not_applied_to_non_driving_mode",
+            )
+
+        duration_matrix = apply_traffic_profile(
+            duration_matrix,
+            effective_traffic_profile,
+        )
+
+        if routing_algorithm == "cws":
+            algorithm_start = perf_counter()
+            total_distance_km, routes = clarke_wright_savings(
+                matrix=distance_matrix,
+                n_clients=len(clients),
+                vehicle_capacity=vehicle_capacity,
+                client_demands=client_demands,
+                duration_matrix=duration_matrix,
+                max_route_duration_min=max_route_duration_min,
+                route_start_time_per_route_min=route_start_time_per_route_min,
+            )
+            routing_runtime_seconds = perf_counter() - algorithm_start
+            initial_distance_km = float(total_distance_km)
+
+        elif routing_algorithm == "ils":
+            # Build a separate CWS reference solution for an explicit and
+            # reproducible comparison. This baseline calculation is excluded
+            # from the reported ILS runtime; the ILS runtime itself includes
+            # its own CWS initialization and all local-search iterations.
+            initial_distance_km, _ = clarke_wright_savings(
+                matrix=distance_matrix,
+                n_clients=len(clients),
+                vehicle_capacity=vehicle_capacity,
+                client_demands=client_demands,
+                duration_matrix=duration_matrix,
+                max_route_duration_min=max_route_duration_min,
+                route_start_time_per_route_min=route_start_time_per_route_min,
+            )
+
+            algorithm_start = perf_counter()
+            total_distance_km, routes = iterated_local_search(
+                matrix=distance_matrix,
+                n_clients=len(clients),
+                vehicle_capacity=vehicle_capacity,
+                client_demands=client_demands,
+                duration_matrix=duration_matrix,
+                max_route_duration_min=max_route_duration_min,
+                route_start_time_per_route_min=route_start_time_per_route_min,
+                max_iterations=ils_max_iterations,
+                max_iterations_without_improvement=(
+                    ils_max_iterations_without_improvement
+                ),
+                perturbation_moves=ils_perturbation_moves,
+                random_seed=ils_random_seed,
+            )
+            routing_runtime_seconds = perf_counter() - algorithm_start
+
+        else:
+            raise ValueError(
+                "Unsupported routing algorithm: "
+                f"{routing_algorithm!r}. Expected 'cws' or 'ils'."
+            )
+
+        initial_distance_km = float(initial_distance_km)
+        total_distance_km = float(total_distance_km)
+        improvement_distance_km = max(
+            0.0,
+            initial_distance_km - total_distance_km,
+        )
+        improvement_percent = (
+            100.0 * improvement_distance_km / initial_distance_km
+            if initial_distance_km > 0.0
+            else 0.0
+        )
+
+        print(
+            f"Routing metrics [{routing_algorithm.upper()} | {transport_mode}]: "
+            f"initial={initial_distance_km:.3f} km | "
+            f"final={total_distance_km:.3f} km | "
+            f"improvement={improvement_distance_km:.3f} km "
+            f"({improvement_percent:.2f}%) | "
+            f"runtime={routing_runtime_seconds:.4f} s"
+        )
+            
+        route_durations = calculate_route_durations(
+            duration_matrix,
+            routes,
+            route_start_time_per_route_min=route_start_time_per_route_min,
+        )
+
+        total_duration_min = sum(route_durations)
+        route_distances = [
+            calculate_routes_matrix_cost(distance_matrix, [route])
+            for route in routes
+        ]
+        demands = (
+            np.ones(len(clients), dtype=float)
+            if client_demands is None
+            else np.asarray(client_demands, dtype=float)
+        )
+        route_loads = calculate_route_loads(routes, demands)
+
+        service_time = (
+            len(clients) * SERVICE_TIME_PER_STOP_MIN
+            + len(routes) * float(route_start_time_per_route_min)
+        )
+
+        return OsrmRoutePlan(
+            transport_mode=transport_mode,
+            vehicle_capacity=float(vehicle_capacity),
+            routes=routes,
+            total_distance_km=total_distance_km,
+            total_duration_min=total_duration_min,
+            route_durations_min=route_durations,
+            route_distances_km=route_distances,
+            route_loads=route_loads,
+            route_start_time_per_route_min=float(route_start_time_per_route_min),
+            service_time_min=service_time,
+            routing_algorithm=routing_algorithm,
+            routing_runtime_seconds=float(routing_runtime_seconds),
+            initial_distance_km=initial_distance_km,
+            improvement_distance_km=improvement_distance_km,
+            improvement_percent=improvement_percent,
+            traffic_profile=effective_traffic_profile.name,
+            traffic_duration_multiplier=(
+                effective_traffic_profile.duration_multiplier
+            ),
+            traffic_source=effective_traffic_profile.source,
+        )
+
+    def build_independent_round_trips(
+        self,
+        *,
+        depot_latitude: float,
+        depot_longitude: float,
+        clients: pd.DataFrame,
+        transport_mode: str,
+        trip_weights=None,
+    ) -> tuple[float, float]:
+        distance_matrix, duration_matrix = self.get_matrices(
+            depot_latitude=depot_latitude,
+            depot_longitude=depot_longitude,
+            clients=clients,
+            transport_mode=transport_mode,
+        )
+
+        client_count = len(clients)
+        if trip_weights is None:
+            weights = np.ones(client_count, dtype=float)
+        else:
+            weights = np.asarray(trip_weights, dtype=float)
+            if weights.shape != (client_count,):
+                raise ValueError("trip_weights must contain one value per client.")
+
+        distance = sum(
+            (distance_matrix[0, i] + distance_matrix[i, 0]) * weights[i - 1]
+            for i in range(1, client_count + 1)
+        )
+        duration = sum(
+            (duration_matrix[0, i] + duration_matrix[i, 0]) * weights[i - 1]
+            for i in range(1, client_count + 1)
+        )
+        return float(distance), float(duration)
+    
+def calculate_facility_supply_route(
+    city: str,
+    selected_cc: pd.Series,
+    used_facilities: pd.DataFrame,
+    truck_capacity: float,
+    facility_label: str,
+    max_route_duration_min: float = MAX_ROUTE_DURATION_MIN,
+    *,
+    routing_config: RoutingAlgorithmConfig,
+    traffic_profile: TrafficProfile,
+) -> tuple[OsrmRoutePlan, pd.DataFrame]:
+    """Route logistics-center supply to every used facility.
+
+    Facility demand is split into visits no larger than truck capacity.
+    Each CWS route represents a truck tour that leaves the logistics center
+    once and returns once.
+    """
+
+    if used_facilities.empty:
+        return OsrmRoutePlan(
+            transport_mode="driving",
+            vehicle_capacity=float(truck_capacity),
+            routes=[],
+            total_distance_km=0.0,
+            total_duration_min=0.0,
+            route_durations_min=[],
+            route_distances_km=[],
+            route_loads=[],
+            route_start_time_per_route_min=TRUCK_LOADING_TIME_PER_ROUTE_MIN,
+            service_time_min=0.0,
+            routing_algorithm=routing_config.algorithm,
+            routing_runtime_seconds=0.0,
+            initial_distance_km=0.0,
+            improvement_distance_km=0.0,
+            improvement_percent=0.0,
+            traffic_profile=traffic_profile.name,
+            traffic_duration_multiplier=traffic_profile.duration_multiplier,
+            traffic_source=traffic_profile.source,
+        ), pd.DataFrame()
+
+    supply_visits = expand_facility_supply_visits(
+        used_facilities,
+        truck_capacity,
+    )
+
+    print(
+        f"{facility_label} supply: {len(used_facilities)} used facilities, "
+        f"{len(supply_visits)} capacity-feasible visits"
+    )
+
+    router = CapacityAwareOsrmRouter(city)
+    plan = router.build_capacity_plan(
+        depot_latitude=float(selected_cc["Latitude"]),
+        depot_longitude=float(selected_cc["Longitude"]),
+        clients=supply_visits[["Latitude", "Longitude"]],
+        transport_mode="driving",
+        vehicle_capacity=truck_capacity,
+        client_demands=supply_visits["Demand"].to_numpy(dtype=float),
+        max_route_duration_min=max_route_duration_min,
+        route_start_time_per_route_min=TRUCK_LOADING_TIME_PER_ROUTE_MIN,
+        routing_algorithm=routing_config.algorithm,
+        ils_max_iterations=routing_config.ils_max_iterations,
+        ils_max_iterations_without_improvement=(
+            routing_config.ils_max_iterations_without_improvement
+        ),
+        ils_perturbation_moves=routing_config.ils_perturbation_moves,
+        ils_random_seed=routing_config.ils_random_seed,
+        traffic_profile=traffic_profile,
+    )
+
+    print(
+        f"{facility_label} supply plan: {plan.route_count} truck routes, "
+        f"{plan.total_distance_km:.2f} km, "
+        f"{plan.total_duration_min:.2f} total min"
+    )
+
+    return plan, supply_visits
+
+def expand_facility_supply_visits(
+    facilities: pd.DataFrame,
+    vehicle_capacity: float,
+) -> pd.DataFrame:
+    """
+    Split each facility demand into vehicle-sized delivery visits.
+
+    Every resulting row is one visit that can be assigned to one route.
+    A route still leaves the logistics center once and returns once; repeated
+    facility coordinates represent separate vehicles when demand exceeds
+    capacity.
+    """
+
+    validate_required_columns(
+        facilities,
+        {"Location", "Latitude", "Longitude", "Demand"},
+        "facility supply summary",
+    )
+
+    vehicle_capacity = float(vehicle_capacity)
+
+    if vehicle_capacity <= 0:
+        raise ValueError("Vehicle capacity must be greater than zero.")
+
+    expanded_rows = []
+
+    for facility in facilities.itertuples(index=False):
+        remaining_demand = float(facility.Demand)
+        visit_number = 1
+
+        if remaining_demand <= 0:
+            continue
+
+        while remaining_demand > 0:
+            visit_demand = min(remaining_demand, vehicle_capacity)
+
+            expanded_rows.append(
+                {
+                    "Location": facility.Location,
+                    "Latitude": float(facility.Latitude),
+                    "Longitude": float(facility.Longitude),
+                    "Demand": visit_demand,
+                    "SupplyVisit": visit_number,
+                }
+            )
+
+            remaining_demand -= visit_demand
+            visit_number += 1
+
+    return pd.DataFrame(
+        expanded_rows,
+        columns=[
+            "Location",
+            "Latitude",
+            "Longitude",
+            "Demand",
+            "SupplyVisit",
+        ],
+    )
+
+
+def select_logistics_center(
+    centers: pd.DataFrame,
+    last_mile_lat: float,
+    last_mile_lon: float,
+    *,
+    osrm_host: str,
+    osrm_profile: str,
+):
+    """
+    Select the logistics center with the shortest bidirectional trunk route.
+
+    Coordinate index 0 is the last-mile point. Indices 1..n are the
+    logistics centers, so one OSRM table request provides both directions.
+    """
+
+    centers = centers.copy()
+
+    coords = [(last_mile_lon, last_mile_lat)] + list(
+        zip(centers["Longitude"], centers["Latitude"])
+    )
+
+    distance_matrix = osrm_table(
+        coords,
+        host=osrm_host,
+        profile=osrm_profile,
+    )
+    center_indices = np.arange(1, len(centers) + 1)
+
+    centers["distancia_troncal_ida_km"] = distance_matrix[center_indices, 0]
+    centers["distancia_troncal_regreso_km"] = distance_matrix[0, center_indices]
+    centers["distancia_troncal_total_km"] = (
+        centers["distancia_troncal_ida_km"]
+        + centers["distancia_troncal_regreso_km"]
+    )
+
+    reachable_centers = centers[
+        np.isfinite(centers["distancia_troncal_total_km"])
+    ]
+
+    if reachable_centers.empty:
+        raise RuntimeError(
+            "OSRM could not find a bidirectional route between any logistics "
+            "center and the last-mile point."
+        )
+
+    return reachable_centers.loc[
+        reachable_centers["distancia_troncal_total_km"].idxmin()
+    ]
