@@ -63,6 +63,40 @@ def build_route_detail_rows(
                     plan.traffic_duration_multiplier
                 ),
                 "traffic_source": plan.traffic_source,
+                "time_traffic_profile": plan.time_traffic_profile,
+                "simulation_date": plan.simulation_date,
+                "shift_start_time": plan.shift_start_time,
+                "shift_end_time": plan.shift_end_time,
+                "route_start_datetime": (
+                    plan.route_start_datetimes[route_number - 1]
+                    if len(plan.route_start_datetimes) >= route_number
+                    else ""
+                ),
+                "route_end_datetime": (
+                    plan.route_end_datetimes[route_number - 1]
+                    if len(plan.route_end_datetimes) >= route_number
+                    else ""
+                ),
+                "base_travel_time_min": (
+                    plan.route_base_travel_times_min[route_number - 1]
+                    if len(plan.route_base_travel_times_min) >= route_number
+                    else plan.route_durations_min[route_number - 1]
+                ),
+                "time_dependent_travel_time_min": (
+                    plan.route_adjusted_travel_times_min[route_number - 1]
+                    if len(plan.route_adjusted_travel_times_min) >= route_number
+                    else plan.route_durations_min[route_number - 1]
+                ),
+                "traffic_delay_min": (
+                    plan.route_traffic_delays_min[route_number - 1]
+                    if len(plan.route_traffic_delays_min) >= route_number
+                    else 0.0
+                ),
+                "shift_feasible": (
+                    plan.route_shift_feasible[route_number - 1]
+                    if len(plan.route_shift_feasible) >= route_number
+                    else True
+                ),
                 "stop_sequence": " -> ".join(stop_labels),
             }
         )

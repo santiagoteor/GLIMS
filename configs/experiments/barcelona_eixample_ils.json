@@ -1,0 +1,28 @@
+{
+  "experiment_name": "barcelona_eixample_ils_baseline",
+  "city": "barcelona",
+  "zones": ["l'Eixample"],
+  "demand_scenario": "high",
+  "instance_size": 300,
+  "osrm_profile": "driving",
+  "routing": {
+    "algorithm": "ils",
+    "ils_max_iterations": 100,
+    "ils_max_no_improvement": 20,
+    "ils_perturbation_moves": 2,
+    "ils_random_seed": 42
+  },
+  "traffic": {
+    "static_profile": "baseline",
+    "static_multiplier_override": null,
+    "time_profile": "weekday_schedule",
+    "simulation_date": "2026-07-31",
+    "shift_start": "09:00",
+    "shift_duration_min": 480
+  },
+  "output": {
+    "save_route_details": true,
+    "save_configuration": true,
+    "save_metadata": true
+  }
+}

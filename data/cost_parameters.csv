@@ -1,27 +1,27 @@
-parameter,category,unit,value,description,status
-conventional_van_cost_per_km,variable_opex,EUR/km,0.45,Aggregate distance-related operating cost for a conventional van,current
-conventional_van_labor_cost_per_hour,variable_opex,EUR/hour,18,Labour cost for conventional-van route time,current
-electric_van_cost_per_km,variable_opex,EUR/km,0.20,Aggregate distance-related operating cost for an electric van,current
-electric_van_labor_cost_per_hour,variable_opex,EUR/hour,18,Labour cost for electric-van route time,current
-cargo_bike_cost_per_km,variable_opex,EUR/km,0.05,Aggregate distance-related operating cost for a cargo bike,current
-cargo_bike_labor_cost_per_hour,variable_opex,EUR/hour,14,Rider labour cost,current
-walking_cost_per_km,variable_opex,EUR/km,0,Distance-related operating cost for walking delivery,current
-walking_labor_cost_per_hour,variable_opex,EUR/hour,12,Walking courier labour cost,current
-microhub_commission_per_package,variable_opex,EUR/package,0.70,Handling or service commission per package through a microhub,current
-pudo_commission_per_package,variable_opex,EUR/package,0.50,Handling or service commission per package through a PUDO,current
-microhub_fixed_cost_per_day,fixed_opex,EUR/facility-day,45,Daily fixed OPEX per active microhub,current
-pudo_fixed_cost_per_day,fixed_opex,EUR/facility-day,10,Daily fixed OPEX per active PUDO,pending
-warehouse_fixed_cost_per_day,fixed_opex,EUR/day,0,Daily fixed operating cost of the origin warehouse,pending
-warehouse_handling_cost_per_package,variable_opex,EUR/package,0,Sorting loading and internal handling at the warehouse,pending
-conventional_van_fixed_cost_per_route,fixed_opex,EUR/route,0,Fixed deployment cost per conventional-van route,pending
-electric_van_fixed_cost_per_route,fixed_opex,EUR/route,0,Fixed deployment cost per electric-van route,pending
-cargo_bike_fixed_cost_per_route,fixed_opex,EUR/route,0,Fixed deployment cost per cargo-bike route,pending
-walking_courier_fixed_cost_per_route,fixed_opex,EUR/route,0,Fixed deployment cost per walking-courier route,pending
-microhub_capex_allocation_per_day,capex_allocation,EUR/facility-day,0,Daily amortised CAPEX per active microhub,pending
-pudo_capex_allocation_per_day,capex_allocation,EUR/facility-day,0,Daily amortised CAPEX per active PUDO,pending
-conventional_van_capex_allocation_per_route,capex_allocation,EUR/route,0,Allocated conventional-van CAPEX per route,pending
-electric_van_capex_allocation_per_route,capex_allocation,EUR/route,0,Allocated electric-van CAPEX per route,pending
-cargo_bike_capex_allocation_per_route,capex_allocation,EUR/route,0,Allocated cargo-bike CAPEX per route,pending
-walking_courier_capex_allocation_per_route,capex_allocation,EUR/route,0,Allocated walking-equipment CAPEX per route,pending
-customer_time_cost_per_hour,external_cost,EUR/hour,0,Monetary value assigned to customer collection time,pending
-carbon_cost_per_kg,external_cost,EUR/kgCO2,0,Monetary value assigned to CO2 emissions,pending
+﻿parameter,category,unit,value,description,status
+conventional_van_cost_per_km,variable_opex,EUR/km,0.25,Aggregate cost per km: diesel 0.12 + depreciation 0.07 + insurance and maintenance 0.06,validated
+conventional_van_labor_cost_per_hour,variable_opex,EUR/hour,12,Labour cost for conventional-van route time,validated
+electric_van_cost_per_km,variable_opex,EUR/km,0.3,Aggregate cost per km: electricity 0.02 + depreciation 0.21 + insurance and maintenance 0.07,validated
+electric_van_labor_cost_per_hour,variable_opex,EUR/hour,12,Labour cost for electric-van route time,validated
+cargo_bike_cost_per_km,variable_opex,EUR/km,0.42,Aggregate cost per km: electricity 0.02 + depreciation 0.20 + insurance and maintenance 0.20,validated
+cargo_bike_labor_cost_per_hour,variable_opex,EUR/hour,12,Cargo-bike rider labour cost,validated
+walking_cost_per_km,variable_opex,EUR/km,0,No distance-related operating cost for walking delivery,validated
+walking_labor_cost_per_hour,variable_opex,EUR/hour,12,Walking courier labour cost,validated
+microhub_commission_per_package,variable_opex,EUR/package,0.28,Microhub OPEX per package: rent 0.07 + insurance personnel services and IT 0.21,validated
+pudo_commission_per_package,variable_opex,EUR/package,0.35,Third-party PUDO or locker service fee per package,validated
+microhub_fixed_cost_per_day,fixed_opex,EUR/facility-day,0,Excluded to avoid double counting because microhub OPEX is included per package,excluded
+pudo_fixed_cost_per_day,fixed_opex,EUR/facility-day,0,Excluded because third-party PUDO costs are represented by the per-package fee,excluded
+warehouse_fixed_cost_per_day,fixed_opex,EUR/day,0,Not included in the current cost boundary,pending
+warehouse_handling_cost_per_package,variable_opex,EUR/package,0,Not included in the current cost boundary,pending
+conventional_van_fixed_cost_per_route,fixed_opex,EUR/route,0,Included in aggregate per-km cost or excluded to avoid double counting,excluded
+electric_van_fixed_cost_per_route,fixed_opex,EUR/route,0,Included in aggregate per-km cost or excluded to avoid double counting,excluded
+cargo_bike_fixed_cost_per_route,fixed_opex,EUR/route,0,Included in aggregate per-km cost or excluded to avoid double counting,excluded
+walking_courier_fixed_cost_per_route,fixed_opex,EUR/route,0,No separate fixed route cost in the current model,excluded
+microhub_capex_allocation_per_day,capex_allocation,EUR/facility-day,0,Excluded because microhub cost is represented as OPEX per package,excluded
+pudo_capex_allocation_per_day,capex_allocation,EUR/facility-day,0,Excluded because third-party PUDO service is represented by the per-package fee,excluded
+conventional_van_capex_allocation_per_route,capex_allocation,EUR/route,0,Depreciation is already included in conventional_van_cost_per_km,excluded
+electric_van_capex_allocation_per_route,capex_allocation,EUR/route,0,Depreciation is already included in electric_van_cost_per_km,excluded
+cargo_bike_capex_allocation_per_route,capex_allocation,EUR/route,0,Depreciation is already included in cargo_bike_cost_per_km,excluded
+walking_courier_capex_allocation_per_route,capex_allocation,EUR/route,0,No walking-equipment CAPEX allocation in the current model,excluded
+customer_time_cost_per_hour,external_cost,EUR/hour,0,Customer collection time is reported but not monetised,excluded
+carbon_cost_per_kg,external_cost,EUR/kgCO2,0,Transport emissions are reported but not monetised,excluded
