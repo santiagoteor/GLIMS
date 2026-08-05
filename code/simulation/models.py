@@ -22,8 +22,6 @@ def _build_result(
     selected_cc: pd.Series,
     last_mile_point: OperationalPoint,
     package_count: int,
-    outbound_trunk_distance: float,
-    return_trunk_distance: float,
     total_km: float,
     trip_count: int,
     co2_kg: float,
@@ -42,23 +40,26 @@ def _build_result(
         "tipo_punto_ultima_milla": last_mile_point.point_type,
         "estrategia_punto_ultima_milla": last_mile_point.strategy,
         "paquetes": package_count,
-        "distancia_troncal_ida_km": outbound_trunk_distance,
-        "distancia_troncal_regreso_km": return_trunk_distance,
         "km_recorridos": total_km,
         "numero_viajes": trip_count,
         "emisiones_co2_kg": co2_kg,
-        "costo_distancia_ruta_eur": costs.route_distance_cost,
-        "costo_laboral_ruta_eur": costs.route_labor_cost,
         "costo_operacion_ruta_eur": costs.route_operating_cost,
         "costo_servicio_facility_eur": costs.facility_service_cost,
-        "costo_fijo_facility_eur": costs.facility_fixed_cost,
-        "costo_fijo_almacen_eur": costs.warehouse_fixed_cost,
-        "costo_handling_almacen_eur": costs.warehouse_handling_cost,
-        "costo_fijo_vehiculos_eur": costs.vehicle_fixed_cost,
-        "costo_capital_asignado_eur": costs.capital_allocation_cost,
-        "costo_tiempo_cliente_eur": costs.customer_time_cost,
-        "costo_carbono_eur": costs.carbon_cost,
+        "otros_costos_eur": (
+            costs.facility_fixed_cost
+            + costs.warehouse_fixed_cost
+            + costs.warehouse_handling_cost
+            + costs.vehicle_fixed_cost
+            + costs.capital_allocation_cost
+            + costs.customer_time_cost
+            + costs.carbon_cost
+        ),
         "costo_total_eur": costs.total_cost,
+        "costo_por_paquete_eur": (
+            costs.total_cost / package_count
+            if package_count > 0
+            else 0.0
+        ),
     }
 
 
@@ -138,8 +139,6 @@ def simulate_m1(
         selected_cc=selected_cc,
         last_mile_point=last_mile_point,
         package_count=package_count,
-        outbound_trunk_distance=0.0,
-        return_trunk_distance=0.0,
         total_km=route_plan.total_distance_km,
         trip_count=route_plan.route_count,
         co2_kg=co2_kg,
@@ -210,8 +209,6 @@ def simulate_m2(
         selected_cc=selected_cc,
         last_mile_point=last_mile_point,
         package_count=package_count,
-        outbound_trunk_distance=0.0,
-        return_trunk_distance=0.0,
         total_km=route_plan.total_distance_km,
         trip_count=route_plan.route_count,
         co2_kg=co2_kg,
@@ -272,7 +269,7 @@ def simulate_m3(
     route_distance_cost = supply_distance_cost + bike_distance_cost
     route_labor_cost = supply_labor_cost + bike_labor_cost
 
-    # Existing microhub commission remains in model_parameters.csv.
+    # Microhub service cost is configured in cost_parameters.csv.
     microhub_commission = get_cost_parameter(
         cost_parameters, "microhub_commission_per_package"
     )
@@ -332,8 +329,6 @@ def simulate_m3(
         selected_cc=selected_cc,
         last_mile_point=last_mile_point,
         package_count=package_count,
-        outbound_trunk_distance=0.0,
-        return_trunk_distance=0.0,
         total_km=supply_plan.total_distance_km + bike_distance_km,
         trip_count=supply_plan.route_count + bike_route_count,
         co2_kg=supply_co2,
@@ -457,8 +452,6 @@ def simulate_m4(
         selected_cc=selected_cc,
         last_mile_point=last_mile_point,
         package_count=package_count,
-        outbound_trunk_distance=0.0,
-        return_trunk_distance=0.0,
         total_km=supply_plan.total_distance_km + walking_distance_km,
         trip_count=total_routes,
         co2_kg=supply_co2,
@@ -552,8 +545,6 @@ def simulate_m5(
         selected_cc=selected_cc,
         last_mile_point=last_mile_point,
         package_count=package_count,
-        outbound_trunk_distance=0.0,
-        return_trunk_distance=0.0,
         total_km=supply_plan.total_distance_km + customer_travel_km,
         trip_count=supply_plan.route_count + customer_count,
         co2_kg=co2_kg,

@@ -1,3 +1,6 @@
+from datetime import datetime
+from time import perf_counter
+
 import numpy as np
 import pandas as pd
 
@@ -10,7 +13,8 @@ from code.routing.osrm_client import get_osrm_host, osrm_distance_duration_table
 from code.routing.route_plan import OsrmRoutePlan
 from code.common.data_utils import validate_required_columns
 from code.simulation.traffic import TrafficProfile, apply_traffic_profile
-from time import perf_counter
+from code.traffic.provider import TimeTrafficProvider
+from code.traffic.timeline import evaluate_route_timeline
 
 class CapacityAwareOsrmRouter:
     """
@@ -87,6 +91,9 @@ class CapacityAwareOsrmRouter:
         ils_perturbation_moves: int = 2,
         ils_random_seed: int | None = 42,
         traffic_profile: TrafficProfile | None = None,
+        time_traffic_provider: TimeTrafficProvider | None = None,
+        shift_start: datetime | None = None,
+        shift_end: datetime | None = None,
     ) -> OsrmRoutePlan:
         distance_matrix, duration_matrix = self.get_matrices(
             depot_latitude=depot_latitude,
@@ -94,6 +101,8 @@ class CapacityAwareOsrmRouter:
             clients=clients,
             transport_mode=transport_mode,
         )
+        base_duration_matrix = np.asarray(duration_matrix, dtype=float).copy()
+
         if transport_mode == "driving":
             effective_traffic_profile = (
                 traffic_profile
@@ -196,6 +205,30 @@ class CapacityAwareOsrmRouter:
             route_start_time_per_route_min=route_start_time_per_route_min,
         )
 
+        route_timelines = []
+        if transport_mode == "driving" and time_traffic_provider is not None:
+            if shift_start is None or shift_end is None:
+                raise ValueError(
+                    "shift_start and shift_end are required when a "
+                    "time-dependent traffic provider is used."
+                )
+            route_timelines = [
+                evaluate_route_timeline(
+                    route=route,
+                    duration_matrix=base_duration_matrix,
+                    route_start=shift_start,
+                    shift_end=shift_end,
+                    traffic_provider=time_traffic_provider,
+                    city=self.city,
+                    service_time_per_stop_min=SERVICE_TIME_PER_STOP_MIN,
+                    route_preparation_time_min=route_start_time_per_route_min,
+                )
+                for route in routes
+            ]
+            route_durations = [
+                timeline.total_duration_min for timeline in route_timelines
+            ]
+
         total_duration_min = sum(route_durations)
         route_distances = [
             calculate_routes_matrix_cost(distance_matrix, [route])
@@ -234,6 +267,34 @@ class CapacityAwareOsrmRouter:
                 effective_traffic_profile.duration_multiplier
             ),
             traffic_source=effective_traffic_profile.source,
+            time_traffic_profile=(
+                time_traffic_provider.profile_name
+                if route_timelines
+                else "not_applied"
+            ),
+            simulation_date=(shift_start.date().isoformat() if route_timelines else ""),
+            shift_start_time=(shift_start.time().isoformat(timespec="minutes") if route_timelines else ""),
+            shift_end_time=(shift_end.time().isoformat(timespec="minutes") if route_timelines else ""),
+            route_start_datetimes=[
+                timeline.route_start.isoformat(timespec="minutes")
+                for timeline in route_timelines
+            ],
+            route_end_datetimes=[
+                timeline.route_end.isoformat(timespec="minutes")
+                for timeline in route_timelines
+            ],
+            route_base_travel_times_min=[
+                timeline.base_travel_time_min for timeline in route_timelines
+            ],
+            route_adjusted_travel_times_min=[
+                timeline.adjusted_travel_time_min for timeline in route_timelines
+            ],
+            route_traffic_delays_min=[
+                timeline.traffic_delay_min for timeline in route_timelines
+            ],
+            route_shift_feasible=[
+                timeline.shift_feasible for timeline in route_timelines
+            ],
         )
 
     def build_independent_round_trips(
@@ -280,6 +341,9 @@ def calculate_facility_supply_route(
     *,
     routing_config: RoutingAlgorithmConfig,
     traffic_profile: TrafficProfile,
+    time_traffic_provider: TimeTrafficProvider | None = None,
+    shift_start: datetime | None = None,
+    shift_end: datetime | None = None,
 ) -> tuple[OsrmRoutePlan, pd.DataFrame]:
     """Route logistics-center supply to every used facility.
 
@@ -338,6 +402,9 @@ def calculate_facility_supply_route(
         ils_perturbation_moves=routing_config.ils_perturbation_moves,
         ils_random_seed=routing_config.ils_random_seed,
         traffic_profile=traffic_profile,
+        time_traffic_provider=time_traffic_provider,
+        shift_start=shift_start,
+        shift_end=shift_end,
     )
 
     print(

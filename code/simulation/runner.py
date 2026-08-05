@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pandas as pd
 
 from code.common.constants import (
@@ -30,6 +32,7 @@ from code.simulation.operational_points import (
     select_operational_point,
 )
 from code.simulation.traffic import TrafficProfile
+from code.traffic.provider import TimeTrafficProvider
 from code.simulation.zones import (
     assign_customers_to_nearest_facility,
     build_facility_summary,
@@ -38,6 +41,8 @@ from code.simulation.zones import (
     select_zones,
     warn_zone_overlaps,
 )
+from time import perf_counter
+
 
 def simulate_neighborhood(
     city: str,
@@ -56,6 +61,9 @@ def simulate_neighborhood(
     osrm_profile: str,
     routing_config: RoutingAlgorithmConfig,
     traffic_profile: TrafficProfile,
+    time_traffic_provider: TimeTrafficProvider,
+    shift_start: datetime,
+    shift_end: datetime,
 ):
     """Run the five models using demand stops and classified facilities."""
 
@@ -95,6 +103,9 @@ def simulate_neighborhood(
         ils_perturbation_moves=routing_config.ils_perturbation_moves,
         ils_random_seed=routing_config.ils_random_seed,
         traffic_profile=traffic_profile,
+        time_traffic_provider=time_traffic_provider,
+        shift_start=shift_start,
+        shift_end=shift_end,
     )
     m2_plan = route_planner.build_capacity_plan(
         depot_latitude=direct_cc_lat,
@@ -112,6 +123,9 @@ def simulate_neighborhood(
         ils_perturbation_moves=routing_config.ils_perturbation_moves,
         ils_random_seed=routing_config.ils_random_seed,
         traffic_profile=traffic_profile,
+        time_traffic_provider=time_traffic_provider,
+        shift_start=shift_start,
+        shift_end=shift_end,
     )
 
     # Direct models have no separate trunk leg: CWS includes CC departures/returns.
@@ -138,6 +152,9 @@ def simulate_neighborhood(
         facility_label="M3",
         routing_config=routing_config,
         traffic_profile=traffic_profile,
+        time_traffic_provider=time_traffic_provider,
+        shift_start=shift_start,
+        shift_end=shift_end,
     )
 
     (
@@ -173,6 +190,9 @@ def simulate_neighborhood(
         facility_label="M4/M5",
         routing_config=routing_config,
         traffic_profile=traffic_profile,
+        time_traffic_provider=time_traffic_provider,
+        shift_start=shift_start,
+        shift_end=shift_end,
     )
     (
         m4_distance_km,
@@ -383,6 +403,9 @@ def simulate_city(
     osrm_profile: str,
     routing_config: RoutingAlgorithmConfig,
     traffic_profile: TrafficProfile,
+    time_traffic_provider: TimeTrafficProvider,
+    shift_start: datetime,
+    shift_end: datetime,
     cost_parameters: dict[str, float],
 ):
     centers, boundaries, parameters_df = load_city_data(city)
@@ -404,11 +427,23 @@ def simulate_city(
         boundaries = select_zones(boundaries, active_zones)
         warn_zone_overlaps(boundaries)
  
-    for _, neighborhood in boundaries.iterrows():
+    total_zones = len(boundaries)
+    
+    simulation_start = perf_counter()
+    for zone_number, (_, neighborhood) in enumerate(
+        boundaries.iterrows(),
+        start=1,
+    ):
+        zone_start = perf_counter()
         neighborhood_name = neighborhood["zona"]
         zone_type = neighborhood["tipo"]
         print(f"\nSimulating {city.upper()} - {neighborhood_name} ({zone_type})")
- 
+        print("\n" + "=" * 60)
+        print(
+            f"ZONE {zone_number}/{total_zones}: "
+            f"{neighborhood_name} ({zone_type})"
+        )
+        print("=" * 60)
         demand_points = filter_points_by_neighborhood(demand_instance, neighborhood)
         if demand_points.empty:
             print(f"No demand stops within {neighborhood_name}.")
@@ -483,6 +518,9 @@ def simulate_city(
             osrm_profile=osrm_profile,
             routing_config=routing_config,
             traffic_profile=traffic_profile,
+            time_traffic_provider=time_traffic_provider,
+            shift_start=shift_start,
+            shift_end=shift_end,
         )
  
         all_results.extend(results)
@@ -491,6 +529,15 @@ def simulate_city(
         print(
             f"{neighborhood_name} ({zone_type}): {len(demand_points)} customers, "
             f"{int(demand_points['Demand'].sum())} packages simulated"
+        )
+        
+        zone_runtime = perf_counter() - zone_start
+        total_runtime = perf_counter() - simulation_start
+
+        print(
+            f"Completed zone {zone_number}/{total_zones} "
+            f"in {zone_runtime:.1f} s "
+            f"(total elapsed: {total_runtime:.1f} s)"
         )
  
     return (

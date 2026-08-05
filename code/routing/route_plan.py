@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,16 @@ class OsrmRoutePlan:
     traffic_profile: str = "baseline"
     traffic_duration_multiplier: float = 1.0
     traffic_source: str = "baseline_osrm"
+    time_traffic_profile: str = "not_applied"
+    simulation_date: str = ""
+    shift_start_time: str = ""
+    shift_end_time: str = ""
+    route_start_datetimes: list[str] = field(default_factory=list)
+    route_end_datetimes: list[str] = field(default_factory=list)
+    route_base_travel_times_min: list[float] = field(default_factory=list)
+    route_adjusted_travel_times_min: list[float] = field(default_factory=list)
+    route_traffic_delays_min: list[float] = field(default_factory=list)
+    route_shift_feasible: list[bool] = field(default_factory=list)
 
     @property
     def route_count(self) -> int:
