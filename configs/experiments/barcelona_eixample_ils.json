@@ -1,7 +1,7 @@
 {
   "experiment_name": "barcelona_eixample_ils_baseline",
   "city": "barcelona",
-  "zones": ["l'Eixample","Ciutat Vella", "El Carmel"],
+  "zones": ["l'Eixample"],
   "demand_scenario": "high",
   "instance_size": 300,
   "osrm_profile": "driving",
@@ -16,7 +16,7 @@
     "static_profile": "baseline",
     "static_multiplier_override": null,
     "time_profile": "weekday_schedule",
-    "simulation_date": "2026-08-03",
+    "simulation_date": "2026-07-31",
     "shift_start": "09:00",
     "shift_duration_min": 480
   },

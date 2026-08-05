@@ -92,6 +92,7 @@ class CapacityAwareOsrmRouter:
         ils_random_seed: int | None = 42,
         traffic_profile: TrafficProfile | None = None,
         time_traffic_provider: TimeTrafficProvider | None = None,
+        traffic_zone: str | None = None,
         shift_start: datetime | None = None,
         shift_end: datetime | None = None,
     ) -> OsrmRoutePlan:
@@ -219,7 +220,7 @@ class CapacityAwareOsrmRouter:
                     route_start=shift_start,
                     shift_end=shift_end,
                     traffic_provider=time_traffic_provider,
-                    city=self.city,
+                    traffic_zone=traffic_zone,
                     service_time_per_stop_min=SERVICE_TIME_PER_STOP_MIN,
                     route_preparation_time_min=route_start_time_per_route_min,
                 )
@@ -271,6 +272,12 @@ class CapacityAwareOsrmRouter:
                 time_traffic_provider.profile_name
                 if route_timelines
                 else "not_applied"
+            ),
+            traffic_zone=(traffic_zone or "all") if route_timelines else "",
+            simulation_day_of_week=(
+                shift_start.strftime("%A").lower()
+                if route_timelines
+                else ""
             ),
             simulation_date=(shift_start.date().isoformat() if route_timelines else ""),
             shift_start_time=(shift_start.time().isoformat(timespec="minutes") if route_timelines else ""),
@@ -342,6 +349,7 @@ def calculate_facility_supply_route(
     routing_config: RoutingAlgorithmConfig,
     traffic_profile: TrafficProfile,
     time_traffic_provider: TimeTrafficProvider | None = None,
+    traffic_zone: str | None = None,
     shift_start: datetime | None = None,
     shift_end: datetime | None = None,
 ) -> tuple[OsrmRoutePlan, pd.DataFrame]:
@@ -403,6 +411,7 @@ def calculate_facility_supply_route(
         ils_random_seed=routing_config.ils_random_seed,
         traffic_profile=traffic_profile,
         time_traffic_provider=time_traffic_provider,
+        traffic_zone=traffic_zone,
         shift_start=shift_start,
         shift_end=shift_end,
     )

@@ -41,7 +41,7 @@ def evaluate_route_timeline(
     route_start: datetime,
     shift_end: datetime,
     traffic_provider: TimeTrafficProvider,
-    city: str,
+    traffic_zone: str | None,
     service_time_per_stop_min: float,
     route_preparation_time_min: float,
 ) -> RouteTimeline:
@@ -58,7 +58,8 @@ def evaluate_route_timeline(
     for origin, destination in zip(nodes, nodes[1:]):
         base_duration = float(duration_matrix[origin, destination])
         observation = traffic_provider.get_multiplier(
-            city=city, departure_datetime=current_time
+            zone=traffic_zone,
+            departure_datetime=current_time,
         )
         adjusted_duration = base_duration * observation.multiplier
         arrival_time = current_time + timedelta(minutes=adjusted_duration)

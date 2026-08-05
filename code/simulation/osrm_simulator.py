@@ -133,10 +133,6 @@ def main() -> None:
         start_time=shift_start_clock,
         duration_min=config.traffic.shift_duration_min,
     )
-    time_traffic_provider = TimeTrafficProvider.from_csv(
-        DATA_DIR / "traffic_time_profiles.csv",
-        profile_name=config.traffic.time_profile,
-    )
     cost_parameters = load_cost_parameters(
         DATA_DIR / "cost_parameters.csv"
     )
@@ -145,6 +141,11 @@ def main() -> None:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     for active_city in cities:
+        time_traffic_provider = TimeTrafficProvider.from_city_csv(
+            traffic_folder=DATA_DIR / "traffic",
+            city=active_city,
+            profile_name=config.traffic.time_profile,
+        )
         _run_city_experiment(
             config=config,
             active_city=active_city,
@@ -262,6 +263,8 @@ def _run_city_experiment(
             time_traffic_provider.profile_name
         )
         results_df["simulation_date"] = shift_start.date().isoformat()
+        results_df["simulation_day_of_week"] = shift_start.strftime("%A").lower()
+        results_df["traffic_city_file"] = time_traffic_provider.source_path.name
         results_df["shift_start_time"] = shift_start.time().isoformat(
             timespec="minutes"
         )

@@ -104,6 +104,7 @@ def simulate_neighborhood(
         ils_random_seed=routing_config.ils_random_seed,
         traffic_profile=traffic_profile,
         time_traffic_provider=time_traffic_provider,
+        traffic_zone=neighborhood_name,
         shift_start=shift_start,
         shift_end=shift_end,
     )
@@ -124,6 +125,7 @@ def simulate_neighborhood(
         ils_random_seed=routing_config.ils_random_seed,
         traffic_profile=traffic_profile,
         time_traffic_provider=time_traffic_provider,
+        traffic_zone=neighborhood_name,
         shift_start=shift_start,
         shift_end=shift_end,
     )
@@ -153,6 +155,7 @@ def simulate_neighborhood(
         routing_config=routing_config,
         traffic_profile=traffic_profile,
         time_traffic_provider=time_traffic_provider,
+        traffic_zone=neighborhood_name,
         shift_start=shift_start,
         shift_end=shift_end,
     )
@@ -191,6 +194,7 @@ def simulate_neighborhood(
         routing_config=routing_config,
         traffic_profile=traffic_profile,
         time_traffic_provider=time_traffic_provider,
+        traffic_zone=neighborhood_name,
         shift_start=shift_start,
         shift_end=shift_end,
     )

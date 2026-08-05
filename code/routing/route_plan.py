@@ -22,6 +22,8 @@ class OsrmRoutePlan:
     traffic_duration_multiplier: float = 1.0
     traffic_source: str = "baseline_osrm"
     time_traffic_profile: str = "not_applied"
+    traffic_zone: str = ""
+    simulation_day_of_week: str = ""
     simulation_date: str = ""
     shift_start_time: str = ""
     shift_end_time: str = ""
