@@ -23,6 +23,7 @@ from code.simulation.experiment_output import (
     create_experiment_directory,
     save_json,
 )
+from code.simulation.facility_filter import FacilityFilterSettings
 from code.simulation.runner import simulate_city
 from code.simulation.traffic import load_traffic_profile
 from code.traffic.provider import TimeTrafficProvider
@@ -250,6 +251,18 @@ def _run_city_experiment(
             shift_start=shift_start,
             shift_end=shift_end,
             cost_parameters=cost_parameters,
+            facility_filter_settings=FacilityFilterSettings(
+                enabled=config.facility_filter.enabled,
+                initial_buffer_m=config.facility_filter.initial_buffer_m,
+                buffer_increment_m=config.facility_filter.buffer_increment_m,
+                maximum_buffer_m=config.facility_filter.maximum_buffer_m,
+                minimum_candidates=config.facility_filter.minimum_candidates,
+            ),
+            pudo_capacity_mode=config.facility_assignment.pudo_capacity_mode,
+            microhub_capacity_mode=(
+                config.facility_assignment.microhub_capacity_mode
+            ),
+            show_progress=config.output.show_progress,
         )
 
         results_df["experiment_id"] = experiment_id

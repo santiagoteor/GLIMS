@@ -1,5 +1,6 @@
 
 import numpy as np
+from tqdm.auto import tqdm
 from code.common.constants import SERVICE_TIME_PER_STOP_MIN
 from code.common.routing_utils import calculate_route_durations, calculate_routes_matrix_cost
 
@@ -13,6 +14,7 @@ def clarke_wright_savings(
     duration_matrix: np.ndarray | None = None,
     max_route_duration_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
+    show_progress: bool = False,
 ):
     """
     Build capacity- and duration-feasible routes using parallel Clarke-Wright.
@@ -113,7 +115,15 @@ def clarke_wright_savings(
     savings = []
 
     # Directed savings support asymmetric OSRM matrices.
-    for i in range(1, n_clients + 1):
+    client_indices = tqdm(
+        range(1, n_clients + 1),
+        desc="CWS savings construction",
+        unit="client",
+        disable=not show_progress,
+        mininterval=0.5,
+        leave=False,
+    )
+    for i in client_indices:
         for j in range(1, n_clients + 1):
             if i == j:
                 continue
@@ -129,7 +139,16 @@ def clarke_wright_savings(
 
     savings.sort(reverse=True, key=lambda item: item[0])
 
-    for _saving, i, j in savings:
+    merge_progress = tqdm(
+        savings,
+        desc="CWS route merging",
+        unit="saving",
+        disable=not show_progress,
+        mininterval=0.5,
+        miniters=max(1, len(savings) // 1000),
+        leave=False,
+    )
+    for _saving, i, j in merge_progress:
         route_i_id = route_of[i]
         route_j_id = route_of[j]
 
