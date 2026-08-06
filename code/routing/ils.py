@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from tqdm.auto import tqdm
-
+from time import perf_counter
 from code.routing.cws import clarke_wright_savings
 from code.common.routing_utils import (
     calculate_route_durations,
@@ -405,7 +405,13 @@ def _local_search(
         2. Inter-route relocate.
         3. Intra-route 2-opt again.
     """
-
+    print(
+        f"Starting local search for {len(routes)} routes "
+        f"and {sum(len(route) for route in routes)} clients..."
+    )
+    local_search_start = perf_counter()
+    print("Local search stage 1/3: intra-route 2-opt...")
+    stage_start = perf_counter()
     _, two_opt_routes = improve_routes_two_opt(
         routes,
         matrix,
@@ -413,6 +419,12 @@ def _local_search(
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
     )
+    print(
+        f"Local search stage 1/3 completed in "
+        f"{perf_counter() - stage_start:.2f} seconds."
+    )
+    print("Local search stage 2/3: inter-route relocate...")
+    stage_start = perf_counter()
 
     _, relocate_routes = improve_routes_relocate(
         two_opt_routes,
@@ -423,7 +435,12 @@ def _local_search(
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
     )
-
+    print(
+        f"Local search stage 2/3 completed in "
+        f"{perf_counter() - stage_start:.2f} seconds."
+    )
+    print("Local search stage 3/3: final intra-route 2-opt...")
+    stage_start = perf_counter()
     final_cost, final_routes = improve_routes_two_opt(
         relocate_routes,
         matrix,
@@ -431,7 +448,15 @@ def _local_search(
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
     )
+    print(
+        f"Local search stage 3/3 completed in "
+        f"{perf_counter() - stage_start:.2f} seconds."
+    )
 
+    print(
+        f"Local search completed in "
+        f"{perf_counter() - local_search_start:.2f} seconds."
+    )
     return final_cost, final_routes
 
 
