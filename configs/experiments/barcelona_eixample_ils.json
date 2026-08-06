@@ -5,7 +5,7 @@
     "l'Eixample"
   ],
   "demand_scenario": "high",
-  "instance_size": 300,
+  "instance_size": 1000,
   "osrm_profile": "driving",
   "routing": {
     "algorithm": "ils",
@@ -32,7 +32,7 @@
     "enabled": true,
     "initial_buffer_m": 500,
     "buffer_increment_m": 500,
-    "maximum_buffer_m": 5000,
+    "maximum_buffer_m": 2000,
     "minimum_candidates": 5
   },
   "facility_assignment": {

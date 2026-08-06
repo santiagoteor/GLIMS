@@ -3,6 +3,7 @@ import numpy as np
 from tqdm.auto import tqdm
 from code.common.constants import SERVICE_TIME_PER_STOP_MIN
 from code.common.routing_utils import calculate_route_durations, calculate_routes_matrix_cost
+from time import perf_counter
 
 
 def clarke_wright_savings(
@@ -114,6 +115,14 @@ def clarke_wright_savings(
 
     savings = []
 
+    print(
+        f"Generating directed CWS savings for "
+        f"{n_clients} clients "
+        f"({n_clients * (n_clients - 1):,} candidate pairs)..."
+    )
+
+    savings_start = perf_counter()
+    
     # Directed savings support asymmetric OSRM matrices.
     client_indices = tqdm(
         range(1, n_clients + 1),
@@ -136,9 +145,26 @@ def clarke_wright_savings(
 
             if np.isfinite(saving):
                 savings.append((saving, i, j))
+    savings_generation_seconds = perf_counter() - savings_start
 
+    print(
+        f"Generated {len(savings):,} CWS savings in "
+        f"{savings_generation_seconds:.2f} seconds."
+    )
+
+    print("Sorting CWS savings...")
+    sorting_start = perf_counter()
+    
     savings.sort(reverse=True, key=lambda item: item[0])
+    sorting_seconds = perf_counter() - sorting_start
 
+    print(
+        f"CWS savings sorted in {sorting_seconds:.2f} seconds."
+    )
+
+    print("Starting CWS route merging...")
+    merging_start = perf_counter()
+    
     merge_progress = tqdm(
         savings,
         desc="CWS route merging",
@@ -190,4 +216,11 @@ def clarke_wright_savings(
     final_routes = list(routes.values())
     total_cost = calculate_routes_matrix_cost(matrix, final_routes)
 
+    merging_seconds = perf_counter() - merging_start
+
+    print(
+        f"CWS route merging completed in "
+        f"{merging_seconds:.2f} seconds. "
+        f"Final routes: {len(final_routes)}."
+    )
     return total_cost, final_routes
