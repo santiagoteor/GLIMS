@@ -1,0 +1,4 @@
+city,pbf_url,port_offset
+barcelona,https://download.bbbike.org/osm/bbbike/Barcelona/Barcelona.osm.pbf,10
+madrid,https://data.bbbike.org/osm/pbf/region/europe/spain/madrid.osm.pbf,0
+valencia,https://data.bbbike.org/osm/pbf/region/europe/spain/valencia.osm.pbf,20

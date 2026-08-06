@@ -33,6 +33,10 @@ from code.simulation.operational_points import (
 )
 from code.simulation.traffic import TrafficProfile
 from code.traffic.provider import TimeTrafficProvider
+from code.simulation.facility_filter import (
+    FacilityFilterSettings,
+    filter_facilities_for_zone,
+)
 from code.simulation.zones import (
     assign_customers_to_nearest_facility,
     build_facility_summary,
@@ -64,6 +68,7 @@ def simulate_neighborhood(
     time_traffic_provider: TimeTrafficProvider,
     shift_start: datetime,
     shift_end: datetime,
+    show_progress: bool = False,
 ):
     """Run the five models using demand stops and classified facilities."""
 
@@ -107,6 +112,7 @@ def simulate_neighborhood(
         traffic_zone=neighborhood_name,
         shift_start=shift_start,
         shift_end=shift_end,
+        show_progress=show_progress,
     )
     m2_plan = route_planner.build_capacity_plan(
         depot_latitude=direct_cc_lat,
@@ -128,6 +134,7 @@ def simulate_neighborhood(
         traffic_zone=neighborhood_name,
         shift_start=shift_start,
         shift_end=shift_end,
+        show_progress=show_progress,
     )
 
     # Direct models have no separate trunk leg: CWS includes CC departures/returns.
@@ -158,6 +165,7 @@ def simulate_neighborhood(
         traffic_zone=neighborhood_name,
         shift_start=shift_start,
         shift_end=shift_end,
+        show_progress=show_progress,
     )
 
     (
@@ -172,6 +180,7 @@ def simulate_neighborhood(
         bike_capacity=parameters["BICICLETA_CARGO"]["capacidad"],
         neighborhood_name=neighborhood_name,
         routing_config=routing_config,
+        show_progress=show_progress,
     )
 
     used_microhub_count = len(used_microhubs)
@@ -197,6 +206,7 @@ def simulate_neighborhood(
         traffic_zone=neighborhood_name,
         shift_start=shift_start,
         shift_end=shift_end,
+        show_progress=show_progress,
     )
     (
         m4_distance_km,
@@ -211,6 +221,7 @@ def simulate_neighborhood(
         walking_capacity=parameters["PUDO_A_PIE"]["capacidad"],
         neighborhood_name=neighborhood_name,
         routing_config=routing_config,
+        show_progress=show_progress,
     )
     (
         customer_travel_km,
@@ -411,6 +422,10 @@ def simulate_city(
     shift_start: datetime,
     shift_end: datetime,
     cost_parameters: dict[str, float],
+    facility_filter_settings: FacilityFilterSettings | None = None,
+    pudo_capacity_mode: str = "configured",
+    microhub_capacity_mode: str = "configured",
+    show_progress: bool = False,
 ):
     centers, boundaries, parameters_df = load_city_data(city)
     demand_instance = load_demand_instance(city, demand_scenario, instance_size)
@@ -423,6 +438,11 @@ def simulate_city(
         f"{len(pudos)} PUDOs"
     )
     parameters = get_parameters(parameters_df)
+    effective_filter_settings = (
+        facility_filter_settings
+        if facility_filter_settings is not None
+        else FacilityFilterSettings()
+    )
  
     all_results = []
     all_model_details = {model: [] for model in ("M1", "M2", "M3", "M4", "M5")}
@@ -469,43 +489,66 @@ def simulate_city(
             target_longitude=demand_centroid.longitude,
         )
  
-        neighborhood_microhubs = filter_points_by_neighborhood(
-            microhubs,
-            neighborhood,
+        candidate_microhubs = filter_facilities_for_zone(
+            facilities=microhubs,
+            neighborhood=neighborhood,
+            settings=effective_filter_settings,
+            zone_crs=boundaries.crs,
+            facility_label="Microhub",
+        )
+        candidate_pudos = filter_facilities_for_zone(
+            facilities=pudos,
+            neighborhood=neighborhood,
+            settings=effective_filter_settings,
+            zone_crs=boundaries.crs,
+            facility_label="PUDO",
         )
 
-        microhub_capacity = float(
-            parameters["MICROHUB"]["capacidad"]
+        microhub_capacity = (
+            None
+            if microhub_capacity_mode == "unlimited"
+            else float(parameters["MICROHUB"]["capacidad"])
+        )
+        pudo_capacity = (
+            None
+            if pudo_capacity_mode == "unlimited"
+            else float(parameters["PUDO"]["capacidad"])
         )
 
-        pudo_capacity = float(
-        parameters["PUDO"]["capacidad"]
-    )
- 
-        if neighborhood_microhubs.empty:
-            neighborhood_microhubs = microhubs
- 
         assigned_microhubs = assign_customers_to_nearest_facility(
             customers=demand_points,
-            facilities=neighborhood_microhubs,
+            facilities=candidate_microhubs,
             osrm_host=osrm_host,
             osrm_profile="cycling",
             facility_capacity=microhub_capacity,
+            show_progress=show_progress,
+            progress_label="Assigning customers to microhubs",
         )
- 
+
         print(
-            f"Neighborhood microhubs: {len(neighborhood_microhubs)}, "
-            f"used: {assigned_microhubs['assigned_facility'].nunique()}"
+            f"Candidate microhubs: {len(candidate_microhubs)} of "
+            f"{len(microhubs)} city microhubs | "
+            f"used: {assigned_microhubs['assigned_facility'].nunique()} | "
+            f"capacity mode: {microhub_capacity_mode}"
         )
- 
+
         assigned_pudos = assign_customers_to_nearest_facility(
             customers=demand_points,
-            facilities=pudos,
+            facilities=candidate_pudos,
             osrm_host=osrm_host,
             osrm_profile="walking",
             facility_capacity=pudo_capacity,
+            show_progress=show_progress,
+            progress_label="Assigning customers to PUDOs",
         )
- 
+
+        print(
+            f"Candidate PUDOs: {len(candidate_pudos)} of "
+            f"{len(pudos)} city PUDOs | "
+            f"used: {assigned_pudos['assigned_facility'].nunique()} | "
+            f"capacity mode: {pudo_capacity_mode}"
+        )
+
         results, model_details = simulate_neighborhood(
             city=city,
             neighborhood_name=neighborhood_name,
@@ -525,6 +568,7 @@ def simulate_city(
             time_traffic_provider=time_traffic_provider,
             shift_start=shift_start,
             shift_end=shift_end,
+            show_progress=show_progress,
         )
  
         all_results.extend(results)

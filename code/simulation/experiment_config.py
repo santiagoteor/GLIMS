@@ -28,10 +28,26 @@ class TrafficExperimentConfig:
 
 
 @dataclass(frozen=True)
+class FacilityFilterExperimentConfig:
+    enabled: bool = False
+    initial_buffer_m: float = 500.0
+    buffer_increment_m: float = 500.0
+    maximum_buffer_m: float = 5000.0
+    minimum_candidates: int = 5
+
+
+@dataclass(frozen=True)
+class FacilityAssignmentExperimentConfig:
+    pudo_capacity_mode: str = "configured"
+    microhub_capacity_mode: str = "configured"
+
+
+@dataclass(frozen=True)
 class OutputExperimentConfig:
     save_route_details: bool = True
     save_configuration: bool = True
     save_metadata: bool = True
+    show_progress: bool = False
 
 
 @dataclass(frozen=True)
@@ -47,6 +63,12 @@ class ExperimentConfig:
     )
     traffic: TrafficExperimentConfig = field(
         default_factory=TrafficExperimentConfig
+    )
+    facility_filter: FacilityFilterExperimentConfig = field(
+        default_factory=FacilityFilterExperimentConfig
+    )
+    facility_assignment: FacilityAssignmentExperimentConfig = field(
+        default_factory=FacilityAssignmentExperimentConfig
     )
     output: OutputExperimentConfig = field(
         default_factory=OutputExperimentConfig
@@ -79,6 +101,12 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         osrm_profile=str(raw.get("osrm_profile", "driving")),
         routing=RoutingExperimentConfig(**raw.get("routing", {})),
         traffic=TrafficExperimentConfig(**raw.get("traffic", {})),
+        facility_filter=FacilityFilterExperimentConfig(
+            **raw.get("facility_filter", {})
+        ),
+        facility_assignment=FacilityAssignmentExperimentConfig(
+            **raw.get("facility_assignment", {})
+        ),
         output=OutputExperimentConfig(**raw.get("output", {})),
     )
     validate_experiment_config(config)
@@ -109,6 +137,43 @@ def validate_experiment_config(config: ExperimentConfig) -> None:
         raise ValueError("ils_max_iterations must be greater than zero.")
     if config.routing.ils_perturbation_moves < 0:
         raise ValueError("ils_perturbation_moves cannot be negative.")
+    if config.facility_filter.initial_buffer_m < 0:
+        raise ValueError(
+            "facility_filter.initial_buffer_m cannot be negative."
+        )
+    if config.facility_filter.buffer_increment_m <= 0:
+        raise ValueError(
+            "facility_filter.buffer_increment_m must be greater than zero."
+        )
+    if (
+        config.facility_filter.maximum_buffer_m
+        < config.facility_filter.initial_buffer_m
+    ):
+        raise ValueError(
+            "facility_filter.maximum_buffer_m must be greater than or equal "
+            "to facility_filter.initial_buffer_m."
+        )
+    if config.facility_filter.minimum_candidates <= 0:
+        raise ValueError(
+            "facility_filter.minimum_candidates must be greater than zero."
+        )
+    allowed_capacity_modes = {"configured", "unlimited"}
+    if (
+        config.facility_assignment.pudo_capacity_mode
+        not in allowed_capacity_modes
+    ):
+        raise ValueError(
+            "facility_assignment.pudo_capacity_mode must be "
+            "'configured' or 'unlimited'."
+        )
+    if (
+        config.facility_assignment.microhub_capacity_mode
+        not in allowed_capacity_modes
+    ):
+        raise ValueError(
+            "facility_assignment.microhub_capacity_mode must be "
+            "'configured' or 'unlimited'."
+        )
     if config.traffic.shift_duration_min <= 0:
         raise ValueError("shift_duration_min must be greater than zero.")
     if (
@@ -188,6 +253,8 @@ def resolve_experiment_config(
         ),
         routing=routing,
         traffic=traffic,
+        facility_filter=base.facility_filter,
+        facility_assignment=base.facility_assignment,
         output=base.output,
     )
     validate_experiment_config(resolved)

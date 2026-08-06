@@ -95,6 +95,7 @@ class CapacityAwareOsrmRouter:
         traffic_zone: str | None = None,
         shift_start: datetime | None = None,
         shift_end: datetime | None = None,
+        show_progress: bool = False,
     ) -> OsrmRoutePlan:
         distance_matrix, duration_matrix = self.get_matrices(
             depot_latitude=depot_latitude,
@@ -136,6 +137,7 @@ class CapacityAwareOsrmRouter:
                 duration_matrix=duration_matrix,
                 max_route_duration_min=max_route_duration_min,
                 route_start_time_per_route_min=route_start_time_per_route_min,
+                show_progress=show_progress,
             )
             routing_runtime_seconds = perf_counter() - algorithm_start
             initial_distance_km = float(total_distance_km)
@@ -153,6 +155,7 @@ class CapacityAwareOsrmRouter:
                 duration_matrix=duration_matrix,
                 max_route_duration_min=max_route_duration_min,
                 route_start_time_per_route_min=route_start_time_per_route_min,
+                show_progress=show_progress,
             )
 
             algorithm_start = perf_counter()
@@ -170,6 +173,7 @@ class CapacityAwareOsrmRouter:
                 ),
                 perturbation_moves=ils_perturbation_moves,
                 random_seed=ils_random_seed,
+                show_progress=show_progress,
             )
             routing_runtime_seconds = perf_counter() - algorithm_start
 
@@ -352,6 +356,7 @@ def calculate_facility_supply_route(
     traffic_zone: str | None = None,
     shift_start: datetime | None = None,
     shift_end: datetime | None = None,
+    show_progress: bool = False,
 ) -> tuple[OsrmRoutePlan, pd.DataFrame]:
     """Route logistics-center supply to every used facility.
 
@@ -414,6 +419,7 @@ def calculate_facility_supply_route(
         traffic_zone=traffic_zone,
         shift_start=shift_start,
         shift_end=shift_end,
+        show_progress=show_progress,
     )
 
     print(

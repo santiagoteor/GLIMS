@@ -5,6 +5,7 @@ import geopandas as gpd
 from code.common.constants import MICROHUB_FACILITY_CODES, PUDO_FACILITY_CODES
 from code.common.data_utils import validate_required_columns
 from shapely.geometry import Point
+from tqdm.auto import tqdm
 
 from code.routing.osrm_client import osrm_distance_duration_table
 from code.simulation.operational_points import get_facility_candidates
@@ -68,8 +69,10 @@ def assign_customers_to_nearest_facility(
     *,
     osrm_host: str,
     osrm_profile: str,
-    facility_capacity: float,
+    facility_capacity: float | None,
     facility_name_column: str = "Location",
+    show_progress: bool = False,
+    progress_label: str = "Assigning customers to facilities",
 ) -> pd.DataFrame:
     """
     Assign each customer to the nearest facility using OSRM road distances.
@@ -78,7 +81,9 @@ def assign_customers_to_nearest_facility(
     nearest facility has reached its capacity, the next closest facility is
     considered.
 
-    Facility capacity is measured as the cumulative assigned demand.
+    Facility capacity is measured as cumulative assigned demand. Passing
+    ``None`` disables the capacity constraint and represents theoretically
+    unlimited facility capacity.
     """
 
     validate_required_columns(
@@ -167,6 +172,11 @@ def assign_customers_to_nearest_facility(
         len(facilities),
         dtype=float,
     )
+    capacity_limited = facility_capacity is not None
+    if capacity_limited:
+        facility_capacity = float(facility_capacity)
+        if facility_capacity <= 0:
+            raise ValueError("facility_capacity must be greater than zero.")
 
     assigned_facility = np.empty(
         customer_count,
@@ -183,7 +193,16 @@ def assign_customers_to_nearest_facility(
         dtype=float,
     )
 
-    for customer_idx in range(customer_count):
+    customer_indices = tqdm(
+        range(customer_count),
+        desc=progress_label,
+        unit="customer",
+        disable=not show_progress,
+        mininterval=0.5,
+        leave=False,
+    )
+
+    for customer_idx in customer_indices:
 
         demand = float(
             customers.iloc[customer_idx]["Demand"]
@@ -193,10 +212,13 @@ def assign_customers_to_nearest_facility(
 
         for facility_idx in ordered_facilities[customer_idx]:
 
-            if (
-                facility_load[facility_idx] + demand
+            capacity_available = (
+                not capacity_limited
+                or facility_load[facility_idx] + demand
                 <= facility_capacity
-            ):
+            )
+
+            if capacity_available:
 
                 facility = facilities.iloc[facility_idx]
 
@@ -221,7 +243,8 @@ def assign_customers_to_nearest_facility(
 
             raise ValueError(
                 f"No facility with enough remaining capacity "
-                f"for customer {customer_idx}."
+                f"for customer {customer_idx}. "
+                "Use facility_capacity=None for unlimited capacity."
             )
 
     # ------------------------------------------------------------

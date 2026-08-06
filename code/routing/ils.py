@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from tqdm.auto import tqdm
 
 from code.routing.cws import clarke_wright_savings
 from code.common.routing_utils import (
@@ -447,6 +448,7 @@ def iterated_local_search(
     max_iterations_without_improvement: int | None = 20,
     perturbation_moves: int = 2,
     random_seed: int | None = None,
+    show_progress: bool = False,
 ) -> tuple[float, list[list[int]]]:
     """
     Build a feasible routing solution using Iterated Local Search.
@@ -529,6 +531,7 @@ def iterated_local_search(
         duration_matrix=duration_matrix,
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
+        show_progress=show_progress,
     )
 
     # Step 2: move the initial solution to a local optimum.
@@ -548,7 +551,14 @@ def iterated_local_search(
     iterations_without_improvement = 0
 
     # Step 3: repeatedly perturb and improve the current solution.
-    for _iteration in range(max_iterations):
+    iteration_progress = tqdm(
+        range(max_iterations),
+        desc="ILS optimization",
+        unit="iteration",
+        disable=not show_progress,
+        mininterval=0.5,
+    )
+    for _iteration in iteration_progress:
         perturbed_routes = perturb_routes(
             current_routes,
             demands,
@@ -584,6 +594,12 @@ def iterated_local_search(
             iterations_without_improvement = 0
         else:
             iterations_without_improvement += 1
+
+        if show_progress:
+            iteration_progress.set_postfix(
+                best_km=f"{best_cost:.3f}",
+                no_improvement=iterations_without_improvement,
+            )
 
         if (
             max_iterations_without_improvement is not None
