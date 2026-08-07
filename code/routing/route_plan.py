@@ -14,6 +14,17 @@ class OsrmRoutePlan:
     route_start_time_per_route_min: float
     service_time_min: float
     routing_algorithm: str = "cws"
+    cws_allow_route_reversal: bool = False
+    cws_initial_distance_km: float = 0.0
+    cws_initial_route_count: int = 0
+    cws_runtime_seconds: float = 0.0
+    ils_final_distance_km: float = 0.0
+    ils_final_route_count: int = 0
+    ils_improvement_km: float = 0.0
+    ils_improvement_percent: float = 0.0
+    ils_runtime_seconds: float = 0.0
+    ils_iterations_completed: int = 0
+    ils_iterations_without_improvement: int = 0
     routing_runtime_seconds: float = 0.0
     initial_distance_km: float = 0.0
     improvement_distance_km: float = 0.0

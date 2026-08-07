@@ -11,6 +11,7 @@ from code.routing.cws import clarke_wright_savings
 from code.routing.ils import iterated_local_search
 from code.routing.osrm_client import get_osrm_host, osrm_distance_duration_table, osrm_table
 from code.routing.route_plan import OsrmRoutePlan
+from code.routing.osrm_validation import validate_osrm_matrices
 from code.common.data_utils import validate_required_columns
 from code.simulation.traffic import TrafficProfile, apply_traffic_profile
 from code.traffic.provider import TimeTrafficProvider
@@ -64,6 +65,16 @@ class CapacityAwareOsrmRouter:
             profile=transport_mode,
         )
 
+        # Validate immediately after OSRM responds. This prevents unreachable
+        # demand points (OSRM null -> NumPy NaN) from entering CWS/ILS and
+        # causing a failure only after an expensive local search.
+        validate_osrm_matrices(
+            distance_matrix,
+            duration_matrix,
+            clients=clients,
+            transport_mode=transport_mode,
+        )
+
         self._last_matrix_key = matrix_key
         self._last_matrices = (distance_matrix, duration_matrix)
 
@@ -86,6 +97,7 @@ class CapacityAwareOsrmRouter:
         max_route_duration_min: float | None = MAX_ROUTE_DURATION_MIN,
         route_start_time_per_route_min: float = 0.0,
         routing_algorithm: str = "cws",
+        cws_allow_route_reversal: bool = False,
         ils_max_iterations: int = 100,
         ils_max_iterations_without_improvement: int | None = 20,
         ils_perturbation_moves: int = 2,
@@ -151,15 +163,21 @@ class CapacityAwareOsrmRouter:
                 max_route_duration_min=max_route_duration_min,
                 route_start_time_per_route_min=route_start_time_per_route_min,
                 show_progress=show_progress,
+                allow_route_reversal=cws_allow_route_reversal,
             )
             routing_runtime_seconds = perf_counter() - algorithm_start
             initial_distance_km = float(total_distance_km)
+            cws_initial_distance_km = float(total_distance_km)
+            cws_initial_route_count = len(routes)
+            cws_runtime_seconds = float(routing_runtime_seconds)
+            ils_iterations_completed = 0
+            ils_iterations_without_improvement_final = 0
 
         elif routing_algorithm == "ils":
             print("Building reference CWS solution for ILS comparison...")
             reference_cws_start = perf_counter()
 
-            initial_distance_km, _ = clarke_wright_savings(
+            initial_distance_km, reference_cws_routes = clarke_wright_savings(
                 matrix=distance_matrix,
                 n_clients=len(clients),
                 vehicle_capacity=vehicle_capacity,
@@ -168,6 +186,7 @@ class CapacityAwareOsrmRouter:
                 max_route_duration_min=max_route_duration_min,
                 route_start_time_per_route_min=route_start_time_per_route_min,
                 show_progress=show_progress,
+                allow_route_reversal=cws_allow_route_reversal,
             )
 
             reference_cws_seconds = perf_counter() - reference_cws_start
@@ -180,7 +199,12 @@ class CapacityAwareOsrmRouter:
             print("Starting ILS optimization...")
             algorithm_start = perf_counter()
 
-            total_distance_km, routes = iterated_local_search(
+            (
+                total_distance_km,
+                routes,
+                ils_iterations_completed,
+                ils_iterations_without_improvement_final,
+            ) = iterated_local_search(
                 matrix=distance_matrix,
                 n_clients=len(clients),
                 vehicle_capacity=vehicle_capacity,
@@ -195,8 +219,13 @@ class CapacityAwareOsrmRouter:
                 perturbation_moves=ils_perturbation_moves,
                 random_seed=ils_random_seed,
                 show_progress=show_progress,
+                cws_allow_route_reversal=cws_allow_route_reversal,
+                return_stats=True,
             )
             routing_runtime_seconds = perf_counter() - algorithm_start
+            cws_initial_distance_km = float(initial_distance_km)
+            cws_initial_route_count = len(reference_cws_routes)
+            cws_runtime_seconds = float(reference_cws_seconds)
 
         else:
             raise ValueError(
@@ -284,6 +313,17 @@ class CapacityAwareOsrmRouter:
             route_start_time_per_route_min=float(route_start_time_per_route_min),
             service_time_min=service_time,
             routing_algorithm=routing_algorithm,
+            cws_allow_route_reversal=bool(cws_allow_route_reversal),
+            cws_initial_distance_km=float(cws_initial_distance_km),
+            cws_initial_route_count=int(cws_initial_route_count),
+            cws_runtime_seconds=float(cws_runtime_seconds),
+            ils_final_distance_km=(total_distance_km if routing_algorithm == "ils" else 0.0),
+            ils_final_route_count=(len(routes) if routing_algorithm == "ils" else 0),
+            ils_improvement_km=(improvement_distance_km if routing_algorithm == "ils" else 0.0),
+            ils_improvement_percent=(improvement_percent if routing_algorithm == "ils" else 0.0),
+            ils_runtime_seconds=(float(routing_runtime_seconds) if routing_algorithm == "ils" else 0.0),
+            ils_iterations_completed=int(ils_iterations_completed),
+            ils_iterations_without_improvement=int(ils_iterations_without_improvement_final),
             routing_runtime_seconds=float(routing_runtime_seconds),
             initial_distance_km=initial_distance_km,
             improvement_distance_km=improvement_distance_km,
@@ -429,6 +469,7 @@ def calculate_facility_supply_route(
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=TRUCK_LOADING_TIME_PER_ROUTE_MIN,
         routing_algorithm=routing_config.algorithm,
+        cws_allow_route_reversal=routing_config.cws_allow_route_reversal,
         ils_max_iterations=routing_config.ils_max_iterations,
         ils_max_iterations_without_improvement=(
             routing_config.ils_max_iterations_without_improvement

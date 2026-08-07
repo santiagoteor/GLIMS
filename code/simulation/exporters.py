@@ -107,6 +107,19 @@ def build_route_detail_rows(
                 "initial_distance_km": plan.initial_distance_km,
                 "improvement_distance_km": plan.improvement_distance_km,
                 "improvement_percent": plan.improvement_percent,
+                "cws_allow_route_reversal": plan.cws_allow_route_reversal,
+                "cws_initial_distance_km": plan.cws_initial_distance_km,
+                "cws_initial_route_count": plan.cws_initial_route_count,
+                "cws_runtime_seconds": plan.cws_runtime_seconds,
+                "ils_final_distance_km": plan.ils_final_distance_km,
+                "ils_final_route_count": plan.ils_final_route_count,
+                "ils_improvement_km": plan.ils_improvement_km,
+                "ils_improvement_percent": plan.ils_improvement_percent,
+                "ils_runtime_seconds": plan.ils_runtime_seconds,
+                "ils_iterations_completed": plan.ils_iterations_completed,
+                "ils_iterations_without_improvement": (
+                    plan.ils_iterations_without_improvement
+                ),
                 "traffic_profile": plan.traffic_profile,
                 "traffic_duration_multiplier": (
                     plan.traffic_duration_multiplier

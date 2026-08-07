@@ -11,6 +11,7 @@ from code.common.constants import CITIES, OSRM_PORTS
 @dataclass(frozen=True)
 class RoutingExperimentConfig:
     algorithm: str = "cws"
+    cws_allow_route_reversal: bool = False
     ils_max_iterations: int = 100
     ils_max_no_improvement: int | None = 20
     ils_perturbation_moves: int = 2
@@ -192,6 +193,10 @@ def resolve_experiment_config(
 ) -> ExperimentConfig:
     routing = RoutingExperimentConfig(
         algorithm=_pick(overrides.get("routing_algorithm"), base.routing.algorithm),
+        cws_allow_route_reversal=_pick(
+            overrides.get("cws_allow_route_reversal"),
+            base.routing.cws_allow_route_reversal,
+        ),
         ils_max_iterations=_pick(
             overrides.get("ils_max_iterations"),
             base.routing.ils_max_iterations,

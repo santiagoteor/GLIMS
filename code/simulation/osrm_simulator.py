@@ -69,6 +69,13 @@ def parse_arguments() -> argparse.Namespace:
         choices=("cws", "ils"),
         default=None,
     )
+    parser.add_argument(
+        "--cws-allow-route-reversal",
+        dest="cws_allow_route_reversal",
+        action="store_true",
+        default=None,
+        help="Allow CWS to reverse partial routes before endpoint merges.",
+    )
     parser.add_argument("--ils-max-iterations", type=int, default=None)
     parser.add_argument(
         "--ils-max-no-improvement",
@@ -111,6 +118,7 @@ def main() -> None:
 
     routing_config = RoutingAlgorithmConfig(
         algorithm=config.routing.algorithm,
+        cws_allow_route_reversal=config.routing.cws_allow_route_reversal,
         ils_max_iterations=config.routing.ils_max_iterations,
         ils_max_iterations_without_improvement=(
             config.routing.ils_max_no_improvement
@@ -275,6 +283,7 @@ def _run_city_experiment(
 
         results_df["experiment_id"] = experiment_id
         results_df["routing_algorithm"] = routing_config.algorithm
+        results_df["cws_allow_route_reversal"] = routing_config.cws_allow_route_reversal
         results_df["traffic_profile"] = traffic_profile.name
         results_df["traffic_duration_multiplier"] = (
             traffic_profile.duration_multiplier
@@ -304,6 +313,7 @@ def _run_city_experiment(
                 detail_df = detail_df.assign(
                     experiment_id=experiment_id,
                     routing_algorithm=routing_config.algorithm,
+                    cws_allow_route_reversal=routing_config.cws_allow_route_reversal,
                     selected_traffic_profile=traffic_profile.name,
                 )
                 detail_path = (

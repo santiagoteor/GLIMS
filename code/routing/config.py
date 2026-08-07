@@ -4,6 +4,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class RoutingAlgorithmConfig:
     algorithm: str = "cws"
+    cws_allow_route_reversal: bool = False
     ils_max_iterations: int = 100
     ils_max_iterations_without_improvement: int | None = 20
     ils_perturbation_moves: int = 2
