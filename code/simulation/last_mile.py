@@ -107,6 +107,7 @@ def calculate_microhub_last_mile(
     neighborhood_name: str,
     routing_config: RoutingAlgorithmConfig,
     add_geometry: bool = False,
+    show_progress: bool = False,
 ) -> tuple[float, float, int, float, list[dict]]:
     """
     Simulate bicycle delivery independently from every used microhub.
@@ -163,6 +164,7 @@ def calculate_microhub_last_mile(
             ),
             ils_perturbation_moves=routing_config.ils_perturbation_moves,
             ils_random_seed=routing_config.ils_random_seed,
+            show_progress=show_progress,
         )
 
         total_distance += plan.total_distance_km
@@ -203,6 +205,7 @@ def calculate_pudo_last_mile(
     neighborhood_name: str,
     routing_config: RoutingAlgorithmConfig,
     add_geometry: bool = False,
+    show_progress: bool = False,
 ) -> tuple[float, float, int, float, int, list[dict]]:
     """
     Simulate walking delivery routes independently from every used PUDO.
@@ -262,6 +265,7 @@ def calculate_pudo_last_mile(
             ),
             ils_perturbation_moves=routing_config.ils_perturbation_moves,
             ils_random_seed=routing_config.ils_random_seed,
+            show_progress=show_progress,
         )
 
         total_distance += plan.total_distance_km

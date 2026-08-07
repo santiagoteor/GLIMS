@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import numpy as np
-
+from tqdm.auto import tqdm
+from time import perf_counter
 from code.routing.cws import clarke_wright_savings
 from code.common.routing_utils import (
     calculate_route_durations,
@@ -404,7 +405,13 @@ def _local_search(
         2. Inter-route relocate.
         3. Intra-route 2-opt again.
     """
-
+    print(
+        f"Starting local search for {len(routes)} routes "
+        f"and {sum(len(route) for route in routes)} clients..."
+    )
+    local_search_start = perf_counter()
+    print("Local search stage 1/3: intra-route 2-opt...")
+    stage_start = perf_counter()
     _, two_opt_routes = improve_routes_two_opt(
         routes,
         matrix,
@@ -412,6 +419,12 @@ def _local_search(
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
     )
+    print(
+        f"Local search stage 1/3 completed in "
+        f"{perf_counter() - stage_start:.2f} seconds."
+    )
+    print("Local search stage 2/3: inter-route relocate...")
+    stage_start = perf_counter()
 
     _, relocate_routes = improve_routes_relocate(
         two_opt_routes,
@@ -422,7 +435,12 @@ def _local_search(
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
     )
-
+    print(
+        f"Local search stage 2/3 completed in "
+        f"{perf_counter() - stage_start:.2f} seconds."
+    )
+    print("Local search stage 3/3: final intra-route 2-opt...")
+    stage_start = perf_counter()
     final_cost, final_routes = improve_routes_two_opt(
         relocate_routes,
         matrix,
@@ -430,7 +448,15 @@ def _local_search(
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
     )
+    print(
+        f"Local search stage 3/3 completed in "
+        f"{perf_counter() - stage_start:.2f} seconds."
+    )
 
+    print(
+        f"Local search completed in "
+        f"{perf_counter() - local_search_start:.2f} seconds."
+    )
     return final_cost, final_routes
 
 
@@ -447,6 +473,7 @@ def iterated_local_search(
     max_iterations_without_improvement: int | None = 20,
     perturbation_moves: int = 2,
     random_seed: int | None = None,
+    show_progress: bool = False,
 ) -> tuple[float, list[list[int]]]:
     """
     Build a feasible routing solution using Iterated Local Search.
@@ -529,6 +556,7 @@ def iterated_local_search(
         duration_matrix=duration_matrix,
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
+        show_progress=show_progress,
     )
 
     # Step 2: move the initial solution to a local optimum.
@@ -548,7 +576,14 @@ def iterated_local_search(
     iterations_without_improvement = 0
 
     # Step 3: repeatedly perturb and improve the current solution.
-    for _iteration in range(max_iterations):
+    iteration_progress = tqdm(
+        range(max_iterations),
+        desc="ILS optimization",
+        unit="iteration",
+        disable=not show_progress,
+        mininterval=0.5,
+    )
+    for _iteration in iteration_progress:
         perturbed_routes = perturb_routes(
             current_routes,
             demands,
@@ -584,6 +619,12 @@ def iterated_local_search(
             iterations_without_improvement = 0
         else:
             iterations_without_improvement += 1
+
+        if show_progress:
+            iteration_progress.set_postfix(
+                best_km=f"{best_cost:.3f}",
+                no_improvement=iterations_without_improvement,
+            )
 
         if (
             max_iterations_without_improvement is not None

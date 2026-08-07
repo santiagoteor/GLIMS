@@ -1,9 +1,11 @@
 {
   "experiment_name": "barcelona_eixample_ils_baseline",
   "city": "barcelona",
-  "zones": ["l'Eixample"],
+  "zones": [
+    "l'Eixample"
+  ],
   "demand_scenario": "high",
-  "instance_size": 300,
+  "instance_size": 1000,
   "osrm_profile": "driving",
   "routing": {
     "algorithm": "ils",
@@ -23,6 +25,18 @@
   "output": {
     "save_route_details": true,
     "save_configuration": true,
-    "save_metadata": true
+    "save_metadata": true,
+    "show_progress": true
+  },
+  "facility_filter": {
+    "enabled": true,
+    "initial_buffer_m": 500,
+    "buffer_increment_m": 500,
+    "maximum_buffer_m": 2000,
+    "minimum_candidates": 5
+  },
+  "facility_assignment": {
+    "pudo_capacity_mode": "unlimited",
+    "microhub_capacity_mode": "unlimited"
   }
 }
