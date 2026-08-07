@@ -115,7 +115,50 @@ def simulate_neighborhood(
         shift_start=shift_start,
         shift_end=shift_end,
         show_progress=show_progress,
+        exclude_unroutable_clients=True,
     )
+
+    # Apply the M1 driving-routability exclusion consistently to all models.
+    # The route indices in m1_plan refer to this filtered customer order.
+    if m1_plan.unroutable_client_positions:
+        excluded_positions = set(m1_plan.unroutable_client_positions)
+        keep_mask = pd.Series(
+            [
+                position not in excluded_positions
+                for position in range(len(demand_points))
+            ],
+            index=demand_points.index,
+        )
+
+        demand_points = demand_points.loc[keep_mask].reset_index(drop=True)
+
+        if len(assigned_pudos) == len(keep_mask):
+            assigned_pudos = assigned_pudos.loc[keep_mask.to_numpy()].reset_index(drop=True)
+        else:
+            raise ValueError(
+                "assigned_pudos no longer matches the demand-point ordering "
+                "needed for unroutable-customer exclusion."
+            )
+
+        if len(assigned_microhubs) == len(keep_mask):
+            assigned_microhubs = assigned_microhubs.loc[keep_mask.to_numpy()].reset_index(drop=True)
+        else:
+            raise ValueError(
+                "assigned_microhubs no longer matches the demand-point ordering "
+                "needed for unroutable-customer exclusion."
+            )
+
+        customer_count = len(demand_points)
+        package_count = int(demand_points["Demand"].sum())
+        client_demands = demand_points["Demand"].to_numpy(dtype=float)
+
+        print(
+            "Applied driving-routability exclusion consistently across M1-M5: "
+            f"{m1_plan.unroutable_customer_count} customers / "
+            f"{m1_plan.unroutable_package_count:g} packages excluded; "
+            f"{customer_count} customers / {package_count} packages remain."
+        )
+
     m2_plan = route_planner.build_capacity_plan(
         depot_latitude=direct_cc_lat,
         depot_longitude=direct_cc_lon,

@@ -10,8 +10,11 @@ from code.routing.config import RoutingAlgorithmConfig
 from code.routing.cws import clarke_wright_savings
 from code.routing.ils import iterated_local_search
 from code.routing.osrm_client import get_osrm_host, osrm_distance_duration_table, osrm_table
+from code.routing.osrm_validation import (
+    sanitize_osrm_routing_inputs,
+    validate_osrm_matrices,
+)
 from code.routing.route_plan import OsrmRoutePlan
-from code.routing.osrm_validation import validate_osrm_matrices
 from code.common.data_utils import validate_required_columns
 from code.simulation.traffic import TrafficProfile, apply_traffic_profile
 from code.traffic.provider import TimeTrafficProvider
@@ -65,16 +68,6 @@ class CapacityAwareOsrmRouter:
             profile=transport_mode,
         )
 
-        # Validate immediately after OSRM responds. This prevents unreachable
-        # demand points (OSRM null -> NumPy NaN) from entering CWS/ILS and
-        # causing a failure only after an expensive local search.
-        validate_osrm_matrices(
-            distance_matrix,
-            duration_matrix,
-            clients=clients,
-            transport_mode=transport_mode,
-        )
-
         self._last_matrix_key = matrix_key
         self._last_matrices = (distance_matrix, duration_matrix)
 
@@ -108,6 +101,7 @@ class CapacityAwareOsrmRouter:
         shift_start: datetime | None = None,
         shift_end: datetime | None = None,
         show_progress: bool = False,
+        exclude_unroutable_clients: bool = False,
     ) -> OsrmRoutePlan:
         distance_matrix, duration_matrix = self.get_matrices(
             depot_latitude=depot_latitude,
@@ -115,6 +109,77 @@ class CapacityAwareOsrmRouter:
             clients=clients,
             transport_mode=transport_mode,
         )
+
+        original_clients = clients.reset_index(drop=True).copy()
+        original_demands = (
+            np.ones(len(original_clients), dtype=float)
+            if client_demands is None
+            else np.asarray(client_demands, dtype=float)
+        )
+
+        if exclude_unroutable_clients:
+            (
+                distance_matrix,
+                duration_matrix,
+                clients,
+                client_demands,
+                unroutable_client_positions,
+                unroutable_clients,
+            ) = sanitize_osrm_routing_inputs(
+                distance_matrix,
+                duration_matrix,
+                clients=original_clients,
+                client_demands=original_demands,
+                transport_mode=transport_mode,
+            )
+        else:
+            validate_osrm_matrices(
+                distance_matrix,
+                duration_matrix,
+                clients=original_clients,
+                transport_mode=transport_mode,
+            )
+            clients = original_clients
+            client_demands = original_demands
+            unroutable_client_positions = []
+            unroutable_clients = original_clients.iloc[0:0].copy()
+
+        unroutable_package_count = float(
+            original_demands[unroutable_client_positions].sum()
+            if unroutable_client_positions
+            else 0.0
+        )
+        id_column = next(
+            (
+                column
+                for column in ("customer_id", "Customer_ID", "ID", "id")
+                if column in unroutable_clients.columns
+            ),
+            None,
+        )
+        unroutable_customer_ids = (
+            unroutable_clients[id_column].astype(str).tolist()
+            if id_column is not None
+            else []
+        )
+
+        # If clients were excluded, cache the already-sanitized reduced matrix
+        # under its own coordinate key. M2 uses the same depot and filtered
+        # demand, so it can reuse this matrix instead of making another large
+        # OSRM /table request.
+        if unroutable_client_positions:
+            filtered_coords = [(depot_longitude, depot_latitude)] + list(
+                zip(clients["Longitude"], clients["Latitude"])
+            )
+            self._last_matrix_key = (
+                transport_mode,
+                tuple(
+                    (round(float(lon), 6), round(float(lat), 6))
+                    for lon, lat in filtered_coords
+                ),
+            )
+            self._last_matrices = (distance_matrix, duration_matrix)
+
         print(
             f"Starting routing preparation for {len(clients)} clients "
             f"using {routing_algorithm.upper()}..."
@@ -324,6 +389,10 @@ class CapacityAwareOsrmRouter:
             ils_runtime_seconds=(float(routing_runtime_seconds) if routing_algorithm == "ils" else 0.0),
             ils_iterations_completed=int(ils_iterations_completed),
             ils_iterations_without_improvement=int(ils_iterations_without_improvement_final),
+            unroutable_customer_count=len(unroutable_client_positions),
+            unroutable_package_count=unroutable_package_count,
+            unroutable_client_positions=list(unroutable_client_positions),
+            unroutable_customer_ids=unroutable_customer_ids,
             routing_runtime_seconds=float(routing_runtime_seconds),
             initial_distance_km=initial_distance_km,
             improvement_distance_km=improvement_distance_km,
@@ -381,6 +450,12 @@ class CapacityAwareOsrmRouter:
         distance_matrix, duration_matrix = self.get_matrices(
             depot_latitude=depot_latitude,
             depot_longitude=depot_longitude,
+            clients=clients,
+            transport_mode=transport_mode,
+        )
+        validate_osrm_matrices(
+            distance_matrix,
+            duration_matrix,
             clients=clients,
             transport_mode=transport_mode,
         )

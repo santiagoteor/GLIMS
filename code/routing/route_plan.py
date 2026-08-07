@@ -25,6 +25,10 @@ class OsrmRoutePlan:
     ils_runtime_seconds: float = 0.0
     ils_iterations_completed: int = 0
     ils_iterations_without_improvement: int = 0
+    unroutable_customer_count: int = 0
+    unroutable_package_count: float = 0.0
+    unroutable_client_positions: list[int] = field(default_factory=list)
+    unroutable_customer_ids: list[str] = field(default_factory=list)
     routing_runtime_seconds: float = 0.0
     initial_distance_km: float = 0.0
     improvement_distance_km: float = 0.0
