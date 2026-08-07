@@ -243,3 +243,38 @@ def osrm_distance_duration_table(
         raise RuntimeError(
             "Could not build the OSRM table with the configured block sizes."
         ) from exc
+
+
+
+def osrm_route_geometry(
+    coords,
+    *,
+    host: str,
+    profile: str,
+) -> list[list[float]]:
+    """
+    Query the OSRM /route service for an ordered list of (lon, lat) points
+    and return the road-following geometry as a list of [lon, lat] pairs.
+
+    The coordinates are visited in the given order, so the caller is
+    responsible for arranging them as depot -> stops -> depot.
+    """
+
+    url = f"{host}/route/v1/{profile}/{_format_coords(coords)}"
+    params = {
+        "overview": "full",
+        "geometries": "geojson",
+        "continue_straight": "false",
+    }
+
+    response = requests.get(url, params=params, timeout=60)
+    response.raise_for_status()
+    payload = response.json()
+
+    if payload.get("code") != "Ok" or not payload.get("routes"):
+        raise RuntimeError(
+            f"OSRM /route error: {payload.get('code')} - "
+            f"{payload.get('message', '')}"
+        )
+
+    return payload["routes"][0]["geometry"]["coordinates"]

@@ -79,6 +79,13 @@ def parse_arguments() -> argparse.Namespace:
         type=int,
         default=None,
     )
+    parser.add_argument(
+        "--save-route-geometry",
+        dest="save_route_geometry",
+        action="store_true",
+        default=None,
+        help="Guardar la geometría OSRM de cada ruta como WKT en los CSV.",
+    )
     parser.add_argument("--ils-random-seed", type=int, default=None)
     parser.add_argument("--traffic-profile", default=None)
     parser.add_argument("--traffic-multiplier", type=float, default=None)
@@ -250,6 +257,7 @@ def _run_city_experiment(
             shift_start=shift_start,
             shift_end=shift_end,
             cost_parameters=cost_parameters,
+            add_geometry=config.output.save_route_geometry,
         )
 
         results_df["experiment_id"] = experiment_id

@@ -32,6 +32,7 @@ class OutputExperimentConfig:
     save_route_details: bool = True
     save_configuration: bool = True
     save_metadata: bool = True
+    save_route_geometry: bool = False
 
 
 @dataclass(frozen=True)
@@ -170,6 +171,15 @@ def resolve_experiment_config(
             base.traffic.shift_duration_min,
         ),
     )
+    output = OutputExperimentConfig(
+        save_route_details=base.output.save_route_details,
+        save_configuration=base.output.save_configuration,
+        save_metadata=base.output.save_metadata,
+        save_route_geometry=_pick(
+            overrides.get("save_route_geometry"),
+            base.output.save_route_geometry,
+        ),
+    )
     resolved = ExperimentConfig(
         experiment_name=base.experiment_name,
         city=_pick(overrides.get("city"), base.city),
@@ -188,7 +198,7 @@ def resolve_experiment_config(
         ),
         routing=routing,
         traffic=traffic,
-        output=base.output,
+        output=output,
     )
     validate_experiment_config(resolved)
     return resolved

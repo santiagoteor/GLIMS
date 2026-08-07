@@ -55,3 +55,8 @@ docs/docs_mar_san/
 # Operating system
 .DS_Store
 Thumbs.db
+
+#Archivos temporales
+*:Zone.Identifier
+~$*
+
