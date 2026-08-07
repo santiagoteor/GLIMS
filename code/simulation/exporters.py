@@ -120,6 +120,9 @@ def build_route_detail_rows(
                 "ils_iterations_without_improvement": (
                     plan.ils_iterations_without_improvement
                 ),
+                "unroutable_customer_count": plan.unroutable_customer_count,
+                "unroutable_package_count": plan.unroutable_package_count,
+                "unroutable_customer_ids": ";".join(plan.unroutable_customer_ids),
                 "traffic_profile": plan.traffic_profile,
                 "traffic_duration_multiplier": (
                     plan.traffic_duration_multiplier
