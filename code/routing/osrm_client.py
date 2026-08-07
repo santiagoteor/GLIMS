@@ -191,6 +191,124 @@ def _build_chunked_osrm_table(
 
     return distance_matrix, duration_matrix
 
+def osrm_distance_duration_table_rectangular(
+    source_coords,
+    destination_coords,
+    *,
+    host: str,
+    profile: str,
+    block_size: int = OSRM_TABLE_BLOCK_SIZE,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Return an OSRM source -> destination distance/duration matrix.
+
+    Unlike osrm_distance_duration_table(), this function does not build
+    a complete square matrix. It calculates only the requested
+    source-to-destination relationships.
+
+    This is intended for operations such as customer -> facility
+    assignment, where customer-to-customer and facility-to-facility
+    distances are unnecessary.
+    """
+
+    source_coords = list(source_coords)
+    destination_coords = list(destination_coords)
+
+    source_count = len(source_coords)
+    destination_count = len(destination_coords)
+
+    if source_count == 0:
+        return (
+            np.empty((0, destination_count), dtype=float),
+            np.empty((0, destination_count), dtype=float),
+        )
+
+    if destination_count == 0:
+        raise ValueError(
+            "At least one destination coordinate is required."
+        )
+
+    distance_matrix = np.full(
+        (source_count, destination_count),
+        np.nan,
+        dtype=float,
+    )
+    duration_matrix = np.full(
+        (source_count, destination_count),
+        np.nan,
+        dtype=float,
+    )
+
+    source_blocks = [
+        (start, min(start + block_size, source_count))
+        for start in range(0, source_count, block_size)
+    ]
+
+    destination_blocks = [
+        (start, min(start + block_size, destination_count))
+        for start in range(0, destination_count, block_size)
+    ]
+
+    request_count = len(source_blocks) * len(destination_blocks)
+    completed = 0
+
+    print(
+        f"Building rectangular OSRM table: "
+        f"{source_count} sources x {destination_count} destinations; "
+        f"{len(source_blocks)}x{len(destination_blocks)} blocks "
+        f"({request_count} requests, block size {block_size})."
+    )
+
+    for source_start, source_end in source_blocks:
+        source_block = source_coords[source_start:source_end]
+        current_source_count = len(source_block)
+
+        for destination_start, destination_end in destination_blocks:
+            destination_block = destination_coords[
+                destination_start:destination_end
+            ]
+            current_destination_count = len(destination_block)
+
+            request_coords = source_block + destination_block
+
+            sources = range(current_source_count)
+
+            destinations = range(
+                current_source_count,
+                current_source_count + current_destination_count,
+            )
+
+            block_distances, block_durations = (
+                _request_osrm_distance_duration_table(
+                    request_coords,
+                    host=host,
+                    profile=profile,
+                    sources=sources,
+                    destinations=destinations,
+                )
+            )
+
+            distance_matrix[
+                source_start:source_end,
+                destination_start:destination_end,
+            ] = block_distances
+
+            duration_matrix[
+                source_start:source_end,
+                destination_start:destination_end,
+            ] = block_durations
+
+            completed += 1
+
+            if completed == request_count or completed % 10 == 0:
+                print(
+                    f"  OSRM rectangular blocks: "
+                    f"{completed}/{request_count}",
+                    end="\r" if completed < request_count else "\n",
+                )
+
+    return distance_matrix, duration_matrix
+
 def osrm_distance_duration_table(
     coords,
     *,

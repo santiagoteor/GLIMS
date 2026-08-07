@@ -7,7 +7,8 @@ from code.common.data_utils import validate_required_columns
 from shapely.geometry import Point
 from tqdm.auto import tqdm
 
-from code.routing.osrm_client import osrm_distance_duration_table
+from code.routing.osrm_client import osrm_distance_duration_table_rectangular
+
 from code.simulation.operational_points import get_facility_candidates
 
 def filter_points_by_neighborhood(points: pd.DataFrame, neighborhood) -> pd.DataFrame:
@@ -77,13 +78,16 @@ def assign_customers_to_nearest_facility(
     """
     Assign each customer to the nearest facility using OSRM road distances.
 
-    Facilities are considered in order of increasing road distance. If the
-    nearest facility has reached its capacity, the next closest facility is
-    considered.
+    Only the customer -> facility rectangular OSRM matrix is calculated.
+    Customer-to-customer and facility-to-facility distances are not needed
+    for this assignment.
 
-    Facility capacity is measured as cumulative assigned demand. Passing
-    ``None`` disables the capacity constraint and represents theoretically
-    unlimited facility capacity.
+    Facilities are considered in order of increasing road distance. If
+    facility capacity is limited and the nearest facility has reached its
+    capacity, the next closest facility is considered.
+
+    Passing ``facility_capacity=None`` disables the facility-capacity
+    constraint and represents theoretically unlimited capacity.
     """
 
     validate_required_columns(
@@ -112,23 +116,30 @@ def assign_customers_to_nearest_facility(
         f"Facilities: {len(facilities)}"
     )
 
-    coords = (
-        list(zip(customers["Longitude"], customers["Latitude"]))
-        + list(zip(facilities["Longitude"], facilities["Latitude"]))
+    customer_coords = list(
+        zip(
+            customers["Longitude"],
+            customers["Latitude"],
+        )
     )
 
-    distance_matrix, _ = osrm_distance_duration_table(
-        coords,
-        host=osrm_host,
-        profile=osrm_profile,
+    facility_coords = list(
+        zip(
+            facilities["Longitude"],
+            facilities["Latitude"],
+        )
+    )
+
+    facility_distances, _ = (
+        osrm_distance_duration_table_rectangular(
+            customer_coords,
+            facility_coords,
+            host=osrm_host,
+            profile=osrm_profile,
+        )
     )
 
     customer_count = len(customers)
-
-    facility_distances = distance_matrix[
-        :customer_count,
-        customer_count:,
-    ]
 
     ordered_facilities = np.argsort(
         facility_distances,
@@ -172,11 +183,16 @@ def assign_customers_to_nearest_facility(
         len(facilities),
         dtype=float,
     )
+
     capacity_limited = facility_capacity is not None
+
     if capacity_limited:
         facility_capacity = float(facility_capacity)
+
         if facility_capacity <= 0:
-            raise ValueError("facility_capacity must be greater than zero.")
+            raise ValueError(
+                "facility_capacity must be greater than zero."
+            )
 
     assigned_facility = np.empty(
         customer_count,
@@ -218,31 +234,31 @@ def assign_customers_to_nearest_facility(
                 <= facility_capacity
             )
 
-            if capacity_available:
+            if not capacity_available:
+                continue
 
-                facility = facilities.iloc[facility_idx]
+            facility = facilities.iloc[facility_idx]
 
-                assigned_facility[customer_idx] = (
-                    facility_names.iloc[facility_idx]
-                )
+            assigned_facility[customer_idx] = (
+                facility_names.iloc[facility_idx]
+            )
 
-                assigned_latitude[customer_idx] = (
-                    facility["Latitude"]
-                )
+            assigned_latitude[customer_idx] = float(
+                facility["Latitude"]
+            )
 
-                assigned_longitude[customer_idx] = (
-                    facility["Longitude"]
-                )
+            assigned_longitude[customer_idx] = float(
+                facility["Longitude"]
+            )
 
-                facility_load[facility_idx] += demand
+            facility_load[facility_idx] += demand
 
-                assigned = True
-                break
+            assigned = True
+            break
 
         if not assigned:
-
             raise ValueError(
-                f"No facility with enough remaining capacity "
+                "No facility with enough remaining capacity "
                 f"for customer {customer_idx}. "
                 "Use facility_capacity=None for unlimited capacity."
             )
