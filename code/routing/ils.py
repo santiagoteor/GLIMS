@@ -186,6 +186,7 @@ def improve_routes_relocate(
     duration_matrix: np.ndarray | None = None,
     max_route_duration_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
+    show_progress: bool = False,
 ) -> tuple[float, list[list[int]]]:
     """
     Improve a routing solution using best-improvement inter-route relocate.
@@ -215,17 +216,66 @@ def improve_routes_relocate(
         best_routes,
     )
 
+    relocate_pass = 0
+
     while True:
+        relocate_pass += 1
+
         # Loads remain constant while evaluating one best-improvement pass.
         route_loads = [
             _calculate_route_load(route, demands)
             for route in best_routes
         ]
 
+        # ------------------------------------------------------------
+        # Calculate the exact size of the relocate neighborhood
+        # for this pass.
+        #
+        # For every client in source route i, it may be inserted in
+        # len(destination_route) + 1 positions of every other route.
+        # ------------------------------------------------------------
+
+        insertion_slots = [
+            len(route) + 1
+            for route in best_routes
+        ]
+
+        total_insertion_slots = sum(insertion_slots)
+
+        total_candidates = sum(
+            len(source_route)
+            * (
+                total_insertion_slots
+                - insertion_slots[source_route_index]
+            )
+            for source_route_index, source_route
+            in enumerate(best_routes)
+        )
+
+        progress = tqdm(
+            total=total_candidates,
+            desc=f"Relocate pass {relocate_pass}",
+            unit="cand",
+            unit_scale=True,
+            disable=not show_progress,
+            mininterval=1.0,
+            leave=False,
+        )
+
+        # Do not call tqdm.update() for every candidate.
+        # Accumulate progress and update only occasionally.
+        progress_pending = 0
+        progress_update_interval = 100_000
+
         best_delta = 0.0
         best_move = None
 
         for source_route_index, source_route in enumerate(best_routes):
+
+            source_candidate_count = (
+                total_insertion_slots
+                - insertion_slots[source_route_index]
+            )
 
             for source_position, client in enumerate(source_route):
 
@@ -236,8 +286,7 @@ def improve_routes_relocate(
                     + source_route[source_position + 1:]
                 )
 
-                # This route is independent of the destination candidate,
-                # so validate it only once for this client removal.
+                # This removal is independent of destination route.
                 if (
                     reduced_source_route
                     and not _is_route_duration_feasible(
@@ -247,6 +296,14 @@ def improve_routes_relocate(
                         route_start_time_per_route_min,
                     )
                 ):
+                    # All destination/insertion candidates for this
+                    # source client are discarded at once.
+                    progress_pending += source_candidate_count
+
+                    if progress_pending >= progress_update_interval:
+                        progress.update(progress_pending)
+                        progress_pending = 0
+
                     continue
 
                 for (
@@ -257,11 +314,23 @@ def improve_routes_relocate(
                     if destination_route_index == source_route_index:
                         continue
 
+                    destination_candidate_count = (
+                        len(destination_route) + 1
+                    )
+
+                    # Capacity rejection discards all insertion positions
+                    # for this destination route.
                     if (
                         route_loads[destination_route_index]
                         + client_demand
                         > vehicle_capacity
                     ):
+                        progress_pending += destination_candidate_count
+
+                        if progress_pending >= progress_update_interval:
+                            progress.update(progress_pending)
+                            progress_pending = 0
+
                         continue
 
                     for insertion_position in range(
@@ -275,10 +344,6 @@ def improve_routes_relocate(
                             insertion_position=insertion_position,
                         )
 
-                        # We want best improvement. If this candidate does
-                        # not beat the best move already found in this pass,
-                        # there is no reason to perform the more expensive
-                        # duration validation.
                         if delta >= best_delta - 1e-9:
                             continue
 
@@ -304,6 +369,20 @@ def improve_routes_relocate(
                             insertion_position,
                         )
 
+                    # Advance progress for the entire destination-route
+                    # insertion block, rather than once per candidate.
+                    progress_pending += destination_candidate_count
+
+                    if progress_pending >= progress_update_interval:
+                        progress.update(progress_pending)
+                        progress_pending = 0
+
+        # Flush the remaining progress count.
+        if progress_pending:
+            progress.update(progress_pending)
+
+        progress.close()
+
         # No improving feasible relocate exists.
         if best_move is None:
             break
@@ -315,7 +394,6 @@ def improve_routes_relocate(
             insertion_position,
         ) = best_move
 
-        # Apply the selected best move only once.
         client = best_routes[source_route_index].pop(
             source_position
         )
@@ -325,14 +403,12 @@ def improve_routes_relocate(
             client,
         )
 
-        # A one-client source route may now be empty.
         best_routes = [
             route
             for route in best_routes
             if route
         ]
 
-        # Use the exact delta during the search.
         best_cost += best_delta
     # Recalculate once at the end as a consistency safeguard.
     best_cost = calculate_routes_matrix_cost(
@@ -493,6 +569,7 @@ def _local_search(
     duration_matrix: np.ndarray | None = None,
     max_route_duration_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
+    show_progress: bool = False,
 ) -> tuple[float, list[list[int]]]:
     """
     Improve a feasible solution using the configured local-search operators.
@@ -531,6 +608,7 @@ def _local_search(
         duration_matrix=duration_matrix,
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
+        show_progress=show_progress,
     )
     print(
         f"Local search stage 2/3 completed in "
@@ -665,6 +743,7 @@ def iterated_local_search(
         duration_matrix=duration_matrix,
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
+        show_progress=show_progress,
     )
 
     best_cost = current_cost
@@ -700,6 +779,7 @@ def iterated_local_search(
             duration_matrix=duration_matrix,
             max_route_duration_min=max_route_duration_min,
             route_start_time_per_route_min=route_start_time_per_route_min,
+            show_progress=show_progress,
         )
 
         # Classical ILS acceptance: continue searching from the new local
