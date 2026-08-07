@@ -1,8 +1,16 @@
 import pandas as pd
-
+from code.routing.osrm_client import osrm_route_geometry, get_osrm_host
 from code.common.constants import SERVICE_TIME_PER_STOP_MIN
 from code.routing.route_plan import OsrmRoutePlan
 
+
+VEHICLE_OSRM_PROFILE = {
+    "conventional_van": "driving",
+    "electric_van": "driving",
+    "cargo_bike": "cycling",
+    "walking_courier": "walking",
+    "customer_walking": "walking",
+}
 
 def build_route_detail_rows(
     *,
@@ -15,11 +23,21 @@ def build_route_detail_rows(
     plan: "OsrmRoutePlan",
     clients: pd.DataFrame,
     stop_label_column: str | None = None,
+    depot_latitude: float | None = None,
+    depot_longitude: float | None = None,
+    add_geometry: bool = False,
 ) -> list[dict]:
     """Convert a route plan into one auditable CSV record per route."""
 
     rows = []
     normalized_clients = clients.reset_index(drop=True)
+
+    profile = VEHICLE_OSRM_PROFILE.get(vehicle_type, "driving")
+    geometry_enabled = (
+        add_geometry
+        and depot_latitude is not None
+        and depot_longitude is not None
+    )
 
     for route_number, route in enumerate(plan.routes, start=1):
         client_rows = normalized_clients.iloc[
@@ -32,6 +50,37 @@ def build_route_detail_rows(
             stop_labels = client_rows["customer_id"].astype(str).tolist()
         else:
             stop_labels = [str(client_index) for client_index in route]
+
+        geometry_wkt = ""
+        if geometry_enabled:
+            stop_coords = list(
+                zip(
+                    client_rows["Longitude"].astype(float),
+                    client_rows["Latitude"].astype(float),
+                )
+            )
+            ordered = [
+                (depot_longitude, depot_latitude),
+                *stop_coords,
+                (depot_longitude, depot_latitude),
+            ]
+            try:
+                line = osrm_route_geometry(
+                    ordered,
+                    host=get_osrm_host(city, profile),
+                    profile=profile,
+                )
+                geometry_wkt = (
+                    "LINESTRING ("
+                    + ", ".join(f"{lon} {lat}" for lon, lat in line)
+                    + ")"
+                )
+            except Exception as exc:
+                print(
+                    f"[aviso] geometría OSRM falló en "
+                    f"{model_code}/{leg} ruta {route_number}: {exc}"
+                )
+                geometry_wkt = ""
 
         rows.append(
             {
@@ -98,6 +147,7 @@ def build_route_detail_rows(
                     else True
                 ),
                 "stop_sequence": " -> ".join(stop_labels),
+                "geometry_wkt": geometry_wkt,
             }
         )
 

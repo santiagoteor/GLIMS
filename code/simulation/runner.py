@@ -68,6 +68,7 @@ def simulate_neighborhood(
     time_traffic_provider: TimeTrafficProvider,
     shift_start: datetime,
     shift_end: datetime,
+    add_geometry: bool = False,
     show_progress: bool = False,
 ):
     """Run the five models using demand stops and classified facilities."""
@@ -180,6 +181,7 @@ def simulate_neighborhood(
         bike_capacity=parameters["BICICLETA_CARGO"]["capacidad"],
         neighborhood_name=neighborhood_name,
         routing_config=routing_config,
+        add_geometry=add_geometry,
         show_progress=show_progress,
     )
 
@@ -221,6 +223,7 @@ def simulate_neighborhood(
         walking_capacity=parameters["PUDO_A_PIE"]["capacidad"],
         neighborhood_name=neighborhood_name,
         routing_config=routing_config,
+        add_geometry=add_geometry,
         show_progress=show_progress,
     )
     (
@@ -294,6 +297,9 @@ def simulate_neighborhood(
         depot_name=str(direct_cc["Location"]),
         plan=m1_plan,
         clients=demand_points,
+        depot_latitude=direct_cc_lat,
+        depot_longitude=direct_cc_lon,
+        add_geometry=add_geometry,
     )
     m2_detail_rows = build_route_detail_rows(
         city=city,
@@ -304,6 +310,9 @@ def simulate_neighborhood(
         depot_name=str(direct_cc["Location"]),
         plan=m2_plan,
         clients=demand_points,
+        depot_latitude=direct_cc_lat,
+        depot_longitude=direct_cc_lon,
+        add_geometry=add_geometry,
     )
     m3_supply_detail_rows = build_route_detail_rows(
         city=city,
@@ -315,6 +324,9 @@ def simulate_neighborhood(
         plan=m3_supply_plan,
         clients=m3_supply_visits,
         stop_label_column="Location",
+        depot_latitude=float(m3_cc["Latitude"]),
+        depot_longitude=float(m3_cc["Longitude"]),
+        add_geometry=add_geometry,
     )
     m45_supply_detail_rows = build_route_detail_rows(
         city=city,
@@ -326,6 +338,9 @@ def simulate_neighborhood(
         plan=pudo_supply_plan,
         clients=pudo_supply_visits,
         stop_label_column="Location",
+        depot_latitude=float(m3_cc["Latitude"]),
+        depot_longitude=float(m3_cc["Longitude"]),
+        add_geometry=add_geometry,
     )
     m5_supply_detail_rows = [
         {**row, "model": "M5", "route_id": row["route_id"].replace("M4_", "M5_", 1)}
@@ -422,6 +437,7 @@ def simulate_city(
     shift_start: datetime,
     shift_end: datetime,
     cost_parameters: dict[str, float],
+    add_geometry: bool = False,
     facility_filter_settings: FacilityFilterSettings | None = None,
     pudo_capacity_mode: str = "configured",
     microhub_capacity_mode: str = "configured",
@@ -568,6 +584,7 @@ def simulate_city(
             time_traffic_provider=time_traffic_provider,
             shift_start=shift_start,
             shift_end=shift_end,
+            add_geometry=add_geometry,
             show_progress=show_progress,
         )
  

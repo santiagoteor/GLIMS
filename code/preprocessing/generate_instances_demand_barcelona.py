@@ -1,52 +1,3 @@
-"""
-Generador de instancias de demanda de e-commerce para Barcelona, a partir
-de direcciones postales reales ponderadas por poblacion real de cada
-seccion censal, replicando los escenarios de demanda de Castillo et al.
-(2024), "Towards greener city logistics".
-
-Enfoque:
-  - Las direcciones (adreces_postals_elementals.csv) traen distrito y
-    seccion LOCAL al distrito (secc_cens). El padron de poblacion
-    (2026_pad_mdbas.csv) usa un codigo de seccion COMPUESTO
-    (Seccio_Censal = Codi_Districte * 1000 + seccion local). Para poder
-    cruzar ambos archivos, se reconstruye ese mismo codigo compuesto en
-    el archivo de direcciones: seccio_censal = districte * 1000 + secc_cens.
-
-  - A cada direccion se le asigna la poblacion real de su seccion censal
-    (columna Valor del padron). Como varias direcciones comparten la
-    misma seccion, el peso de muestreo de cada direccion es:
-
-        peso_direccion = poblacion_seccion / nº direcciones en esa seccion
-
-    De este modo, la suma de pesos de todas las direcciones de una
-    seccion es igual a la poblacion real de esa seccion (ni mas ni
-    menos), independientemente de cuantos portales tenga registrados.
-
-  - Los clientes candidatos se muestrean sin reemplazo usando ese peso
-    (en vez de muestreo uniforme), asi que las zonas mas pobladas
-    generan proporcionalmente mas clientes candidatos.
-
-  - NOTA: esta version NO excluye direcciones cercanas a micro-hubs /
-    puntos de recogida (se pidio explicitamente no aplicar ese filtro).
-
-  - La demanda de cada cliente (paquetes/dia) NO usa los rangos del
-    articulo original (5-25 / 50-100 / 100-200), porque esos valores
-    estaban pensados para nodos agregados. Aqui cada cliente es una
-    parada real (un portal/direccion concreta), asi que se usan rangos
-    de demanda por parada individual:
-        baja:   1-2 paquetes/dia   (dia con pocos pedidos)
-        media:  2-5 paquetes/dia   (dia normal)
-        alta:   5-10 paquetes/dia  (pico de e-commerce)
-    La poblacion decide DONDE aparecen los clientes, no CUANTO pide
-    cada uno.
-
-  - Se generan instancias anidadas para 100, 200, 400, 600, 800 y 1000
-    clientes (los primeros n del pool maestro ya ponderado).
-
-Requisitos:
-    pip install pandas geopandas shapely numpy --break-system-packages
-"""
-
 import os
 from pathlib import Path
 
@@ -55,9 +6,6 @@ import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point
 
-# ---------------------------------------------------------------------
-# Rutas (relativas a la estructura de carpetas de GLIMS)
-# ---------------------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent          # GLIMS/code/simulation
 GLIMS_DIR = BASE_DIR.parent.parent                  # GLIMS

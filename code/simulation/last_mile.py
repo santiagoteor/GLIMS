@@ -106,6 +106,7 @@ def calculate_microhub_last_mile(
     bike_capacity: float,
     neighborhood_name: str,
     routing_config: RoutingAlgorithmConfig,
+    add_geometry: bool = False,
     show_progress: bool = False,
 ) -> tuple[float, float, int, float, list[dict]]:
     """
@@ -183,6 +184,9 @@ def calculate_microhub_last_mile(
                 depot_name=microhub_name,
                 plan=plan,
                 clients=customers,
+                depot_latitude=float(customers["facility_latitude"].iloc[0]),
+                depot_longitude=float(customers["facility_longitude"].iloc[0]),
+                add_geometry=add_geometry,
             )
         )
 
@@ -200,6 +204,7 @@ def calculate_pudo_last_mile(
     walking_capacity: float,
     neighborhood_name: str,
     routing_config: RoutingAlgorithmConfig,
+    add_geometry: bool = False,
     show_progress: bool = False,
 ) -> tuple[float, float, int, float, int, list[dict]]:
     """
@@ -280,6 +285,9 @@ def calculate_pudo_last_mile(
                 depot_name=pudo_name,
                 plan=plan,
                 clients=customers,
+                depot_latitude=float(customers["facility_latitude"].iloc[0]),
+                depot_longitude=float(customers["facility_longitude"].iloc[0]),
+                add_geometry=add_geometry,
             )
         )
 
