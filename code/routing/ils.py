@@ -123,6 +123,59 @@ def _calculate_route_load(
         sum(client_demands[client_index - 1] for client_index in route)
     )
 
+def _calculate_relocate_delta(
+    matrix: np.ndarray,
+    source_route: list[int],
+    source_position: int,
+    destination_route: list[int],
+    insertion_position: int,
+) -> float:
+    """
+    Calculate the exact distance-cost change produced by moving one client
+    from one route to another.
+
+    The depot is implicit and represented by matrix index 0.
+
+    A negative delta means that the relocate move improves the solution.
+    """
+
+    client = source_route[source_position]
+
+    source_previous = (
+        0
+        if source_position == 0
+        else source_route[source_position - 1]
+    )
+    source_next = (
+        0
+        if source_position == len(source_route) - 1
+        else source_route[source_position + 1]
+    )
+
+    destination_previous = (
+        0
+        if insertion_position == 0
+        else destination_route[insertion_position - 1]
+    )
+    destination_next = (
+        0
+        if insertion_position == len(destination_route)
+        else destination_route[insertion_position]
+    )
+
+    removal_delta = (
+        matrix[source_previous, source_next]
+        - matrix[source_previous, client]
+        - matrix[client, source_next]
+    )
+
+    insertion_delta = (
+        matrix[destination_previous, client]
+        + matrix[client, destination_next]
+        - matrix[destination_previous, destination_next]
+    )
+
+    return float(removal_delta + insertion_delta)
 
 def improve_routes_relocate(
     routes: list[list[int]],
@@ -137,69 +190,103 @@ def improve_routes_relocate(
     """
     Improve a routing solution using best-improvement inter-route relocate.
 
-    One client is removed from a source route and inserted into a different
-    destination route. Only capacity- and duration-feasible improvements are
-    accepted.
+    This implementation evaluates the exact local distance delta of each
+    relocate move instead of rebuilding and recalculating the complete
+    solution for every candidate.
+
+    The search neighborhood and best-improvement policy remain unchanged.
     """
 
     demands = np.asarray(client_demands, dtype=float)
 
     if demands.ndim != 1:
-        raise ValueError("client_demands must be a one-dimensional array.")
+        raise ValueError(
+            "client_demands must be a one-dimensional array."
+        )
 
     best_routes = [
         route.copy()
         for route in routes
         if route
     ]
-    best_cost = calculate_routes_matrix_cost(matrix, best_routes)
 
-    improved = True
+    best_cost = calculate_routes_matrix_cost(
+        matrix,
+        best_routes,
+    )
 
-    while improved:
-        improved = False
-        iteration_best_routes = best_routes
-        iteration_best_cost = best_cost
+    while True:
+        # Loads remain constant while evaluating one best-improvement pass.
+        route_loads = [
+            _calculate_route_load(route, demands)
+            for route in best_routes
+        ]
+
+        best_delta = 0.0
+        best_move = None
 
         for source_route_index, source_route in enumerate(best_routes):
+
             for source_position, client in enumerate(source_route):
+
+                client_demand = float(demands[client - 1])
 
                 reduced_source_route = (
                     source_route[:source_position]
                     + source_route[source_position + 1:]
                 )
 
-                for destination_route_index, destination_route in enumerate(
-                    best_routes
+                # This route is independent of the destination candidate,
+                # so validate it only once for this client removal.
+                if (
+                    reduced_source_route
+                    and not _is_route_duration_feasible(
+                        reduced_source_route,
+                        duration_matrix,
+                        max_route_duration_min,
+                        route_start_time_per_route_min,
+                    )
                 ):
+                    continue
+
+                for (
+                    destination_route_index,
+                    destination_route,
+                ) in enumerate(best_routes):
+
                     if destination_route_index == source_route_index:
                         continue
 
-                    destination_load = _calculate_route_load(
-                        destination_route,
-                        demands,
-                    )
-                    client_demand = float(demands[client - 1])
-
-                    if destination_load + client_demand > vehicle_capacity:
+                    if (
+                        route_loads[destination_route_index]
+                        + client_demand
+                        > vehicle_capacity
+                    ):
                         continue
 
                     for insertion_position in range(
                         len(destination_route) + 1
                     ):
+                        delta = _calculate_relocate_delta(
+                            matrix=matrix,
+                            source_route=source_route,
+                            source_position=source_position,
+                            destination_route=destination_route,
+                            insertion_position=insertion_position,
+                        )
+
+                        # We want best improvement. If this candidate does
+                        # not beat the best move already found in this pass,
+                        # there is no reason to perform the more expensive
+                        # duration validation.
+                        if delta >= best_delta - 1e-9:
+                            continue
+
                         expanded_destination_route = (
                             destination_route[:insertion_position]
                             + [client]
                             + destination_route[insertion_position:]
                         )
-
-                        if reduced_source_route and not _is_route_duration_feasible(
-                            reduced_source_route,
-                            duration_matrix,
-                            max_route_duration_min,
-                            route_start_time_per_route_min,
-                        ):
-                            continue
 
                         if not _is_route_duration_feasible(
                             expanded_destination_route,
@@ -209,39 +296,49 @@ def improve_routes_relocate(
                         ):
                             continue
 
-                        candidate_routes = [
-                            route.copy()
-                            for route in best_routes
-                        ]
-
-                        candidate_routes[source_route_index] = (
-                            reduced_source_route
-                        )
-                        candidate_routes[destination_route_index] = (
-                            expanded_destination_route
+                        best_delta = delta
+                        best_move = (
+                            source_route_index,
+                            source_position,
+                            destination_route_index,
+                            insertion_position,
                         )
 
-                        candidate_routes = [
-                            route
-                            for route in candidate_routes
-                            if route
-                        ]
+        # No improving feasible relocate exists.
+        if best_move is None:
+            break
 
-                        candidate_cost = calculate_routes_matrix_cost(
-                            matrix,
-                            candidate_routes,
-                        )
+        (
+            source_route_index,
+            source_position,
+            destination_route_index,
+            insertion_position,
+        ) = best_move
 
-                        if candidate_cost < iteration_best_cost - 1e-9:
-                            iteration_best_routes = candidate_routes
-                            iteration_best_cost = candidate_cost
-                            improved = True
+        # Apply the selected best move only once.
+        client = best_routes[source_route_index].pop(
+            source_position
+        )
 
+        best_routes[destination_route_index].insert(
+            insertion_position,
+            client,
+        )
+
+        # A one-client source route may now be empty.
         best_routes = [
-            route.copy()
-            for route in iteration_best_routes
+            route
+            for route in best_routes
+            if route
         ]
-        best_cost = iteration_best_cost
+
+        # Use the exact delta during the search.
+        best_cost += best_delta
+    # Recalculate once at the end as a consistency safeguard.
+    best_cost = calculate_routes_matrix_cost(
+        matrix,
+        best_routes,
+    )
 
     return best_cost, best_routes
 

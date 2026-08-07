@@ -103,6 +103,13 @@ class CapacityAwareOsrmRouter:
             clients=clients,
             transport_mode=transport_mode,
         )
+        print(
+            f"Starting routing preparation for {len(clients)} clients "
+            f"using {routing_algorithm.upper()}..."
+        )
+
+        preparation_start = perf_counter()
+        
         base_duration_matrix = np.asarray(duration_matrix, dtype=float).copy()
 
         if transport_mode == "driving":
@@ -126,6 +133,12 @@ class CapacityAwareOsrmRouter:
             duration_matrix,
             effective_traffic_profile,
         )
+        preparation_seconds = perf_counter() - preparation_start
+        print(
+            f"Routing preparation completed in "
+            f"{preparation_seconds:.2f} seconds."
+        )
+        
 
         if routing_algorithm == "cws":
             algorithm_start = perf_counter()
@@ -143,10 +156,9 @@ class CapacityAwareOsrmRouter:
             initial_distance_km = float(total_distance_km)
 
         elif routing_algorithm == "ils":
-            # Build a separate CWS reference solution for an explicit and
-            # reproducible comparison. This baseline calculation is excluded
-            # from the reported ILS runtime; the ILS runtime itself includes
-            # its own CWS initialization and all local-search iterations.
+            print("Building reference CWS solution for ILS comparison...")
+            reference_cws_start = perf_counter()
+
             initial_distance_km, _ = clarke_wright_savings(
                 matrix=distance_matrix,
                 n_clients=len(clients),
@@ -158,7 +170,16 @@ class CapacityAwareOsrmRouter:
                 show_progress=show_progress,
             )
 
+            reference_cws_seconds = perf_counter() - reference_cws_start
+
+            print(
+                f"Reference CWS solution completed in "
+                f"{reference_cws_seconds:.2f} seconds."
+            )
+
+            print("Starting ILS optimization...")
             algorithm_start = perf_counter()
+
             total_distance_km, routes = iterated_local_search(
                 matrix=distance_matrix,
                 n_clients=len(clients),
