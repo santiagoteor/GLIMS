@@ -16,6 +16,7 @@ def clarke_wright_savings(
     max_route_duration_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
     show_progress: bool = False,
+    allow_route_reversal: bool = False,
 ):
     """
     Build capacity- and duration-feasible routes using parallel Clarke-Wright.
@@ -184,15 +185,32 @@ def clarke_wright_savings(
         route_i = routes[route_i_id]
         route_j = routes[route_j_id]
 
-        if route_i[-1] != i or route_j[0] != j:
-            continue
+        if allow_route_reversal:
+            if route_i[-1] == i:
+                oriented_i = route_i
+            elif route_i[0] == i:
+                oriented_i = list(reversed(route_i))
+            else:
+                continue
+
+            if route_j[0] == j:
+                oriented_j = route_j
+            elif route_j[-1] == j:
+                oriented_j = list(reversed(route_j))
+            else:
+                continue
+        else:
+            if route_i[-1] != i or route_j[0] != j:
+                continue
+            oriented_i = route_i
+            oriented_j = route_j
 
         merged_load = route_loads[route_i_id] + route_loads[route_j_id]
 
         if merged_load > vehicle_capacity:
             continue
 
-        merged_route = route_i + route_j
+        merged_route = oriented_i + oriented_j
 
         if duration_limit_enabled:
             merged_duration = calculate_route_durations(

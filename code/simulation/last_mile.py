@@ -158,6 +158,7 @@ def calculate_microhub_last_mile(
             client_demands=customers["Demand"].to_numpy(dtype=float),
             route_start_time_per_route_min=BIKE_PREPARATION_TIME_PER_ROUTE_MIN,
             routing_algorithm=routing_config.algorithm,
+        cws_allow_route_reversal=routing_config.cws_allow_route_reversal,
             ils_max_iterations=routing_config.ils_max_iterations,
             ils_max_iterations_without_improvement=(
                 routing_config.ils_max_iterations_without_improvement
@@ -259,6 +260,7 @@ def calculate_pudo_last_mile(
             client_demands=customers["Demand"].to_numpy(dtype=float),
             route_start_time_per_route_min=WALKING_PREPARATION_TIME_PER_ROUTE_MIN,
             routing_algorithm=routing_config.algorithm,
+        cws_allow_route_reversal=routing_config.cws_allow_route_reversal,
             ils_max_iterations=routing_config.ils_max_iterations,
             ils_max_iterations_without_improvement=(
                 routing_config.ils_max_iterations_without_improvement

@@ -1,5 +1,5 @@
 {
-  "experiment_name": "barcelona_eixample_ils_baseline",
+  "experiment_name": "barcelona_eixample_ils_cws_reversal",
   "city": "barcelona",
   "zones": [
     "l'Eixample"
@@ -12,7 +12,8 @@
     "ils_max_iterations": 100,
     "ils_max_no_improvement": 20,
     "ils_perturbation_moves": 2,
-    "ils_random_seed": 42
+    "ils_random_seed": 42,
+    "cws_allow_route_reversal": true
   },
   "traffic": {
     "static_profile": "baseline",
