@@ -39,7 +39,6 @@ def improve_route_two_opt(
 ) -> tuple[float, list[int]]:
     """
     Improve one depot-based route using best-improvement 2-opt.
-
     The depot is implicit and is not included in ``route``.
     """
 
@@ -113,403 +112,23 @@ def improve_routes_two_opt(
     total_cost = calculate_routes_matrix_cost(matrix, improved_routes)
     return total_cost, improved_routes
 
-def _calculate_route_load(
-    route: list[int],
-    client_demands: np.ndarray,
-) -> float:
-    """Return the total demand assigned to one route."""
-
-    return float(
-        sum(client_demands[client_index - 1] for client_index in route)
-    )
-
-def _calculate_relocate_delta(
-    matrix: np.ndarray,
-    source_route: list[int],
-    source_position: int,
-    destination_route: list[int],
-    insertion_position: int,
-) -> float:
-    """
-    Calculate the exact distance-cost change produced by moving one client
-    from one route to another.
-
-    The depot is implicit and represented by matrix index 0.
-
-    A negative delta means that the relocate move improves the solution.
-    """
-
-    client = source_route[source_position]
-
-    source_previous = (
-        0
-        if source_position == 0
-        else source_route[source_position - 1]
-    )
-    source_next = (
-        0
-        if source_position == len(source_route) - 1
-        else source_route[source_position + 1]
-    )
-
-    destination_previous = (
-        0
-        if insertion_position == 0
-        else destination_route[insertion_position - 1]
-    )
-    destination_next = (
-        0
-        if insertion_position == len(destination_route)
-        else destination_route[insertion_position]
-    )
-
-    removal_delta = (
-        matrix[source_previous, source_next]
-        - matrix[source_previous, client]
-        - matrix[client, source_next]
-    )
-
-    insertion_delta = (
-        matrix[destination_previous, client]
-        + matrix[client, destination_next]
-        - matrix[destination_previous, destination_next]
-    )
-
-    return float(removal_delta + insertion_delta)
-
-def improve_routes_relocate(
-    routes: list[list[int]],
-    matrix: np.ndarray,
-    vehicle_capacity: float,
-    client_demands,
-    *,
-    duration_matrix: np.ndarray | None = None,
-    max_route_duration_min: float | None = None,
-    route_start_time_per_route_min: float = 0.0,
-) -> tuple[float, list[list[int]]]:
-    """
-    Improve a routing solution using best-improvement inter-route relocate.
-
-    This implementation evaluates the exact local distance delta of each
-    relocate move instead of rebuilding and recalculating the complete
-    solution for every candidate.
-
-    The search neighborhood and best-improvement policy remain unchanged.
-    """
-
-    demands = np.asarray(client_demands, dtype=float)
-
-    if demands.ndim != 1:
-        raise ValueError(
-            "client_demands must be a one-dimensional array."
-        )
-
-    best_routes = [
-        route.copy()
-        for route in routes
-        if route
-    ]
-
-    best_cost = calculate_routes_matrix_cost(
-        matrix,
-        best_routes,
-    )
-
-    while True:
-        # Loads remain constant while evaluating one best-improvement pass.
-        route_loads = [
-            _calculate_route_load(route, demands)
-            for route in best_routes
-        ]
-
-        best_delta = 0.0
-        best_move = None
-
-        for source_route_index, source_route in enumerate(best_routes):
-
-            for source_position, client in enumerate(source_route):
-
-                client_demand = float(demands[client - 1])
-
-                reduced_source_route = (
-                    source_route[:source_position]
-                    + source_route[source_position + 1:]
-                )
-
-                # This route is independent of the destination candidate,
-                # so validate it only once for this client removal.
-                if (
-                    reduced_source_route
-                    and not _is_route_duration_feasible(
-                        reduced_source_route,
-                        duration_matrix,
-                        max_route_duration_min,
-                        route_start_time_per_route_min,
-                    )
-                ):
-                    continue
-
-                for (
-                    destination_route_index,
-                    destination_route,
-                ) in enumerate(best_routes):
-
-                    if destination_route_index == source_route_index:
-                        continue
-
-                    if (
-                        route_loads[destination_route_index]
-                        + client_demand
-                        > vehicle_capacity
-                    ):
-                        continue
-
-                    for insertion_position in range(
-                        len(destination_route) + 1
-                    ):
-                        delta = _calculate_relocate_delta(
-                            matrix=matrix,
-                            source_route=source_route,
-                            source_position=source_position,
-                            destination_route=destination_route,
-                            insertion_position=insertion_position,
-                        )
-
-                        # We want best improvement. If this candidate does
-                        # not beat the best move already found in this pass,
-                        # there is no reason to perform the more expensive
-                        # duration validation.
-                        if delta >= best_delta - 1e-9:
-                            continue
-
-                        expanded_destination_route = (
-                            destination_route[:insertion_position]
-                            + [client]
-                            + destination_route[insertion_position:]
-                        )
-
-                        if not _is_route_duration_feasible(
-                            expanded_destination_route,
-                            duration_matrix,
-                            max_route_duration_min,
-                            route_start_time_per_route_min,
-                        ):
-                            continue
-
-                        best_delta = delta
-                        best_move = (
-                            source_route_index,
-                            source_position,
-                            destination_route_index,
-                            insertion_position,
-                        )
-
-        # No improving feasible relocate exists.
-        if best_move is None:
-            break
-
-        (
-            source_route_index,
-            source_position,
-            destination_route_index,
-            insertion_position,
-        ) = best_move
-
-        # Apply the selected best move only once.
-        client = best_routes[source_route_index].pop(
-            source_position
-        )
-
-        best_routes[destination_route_index].insert(
-            insertion_position,
-            client,
-        )
-
-        # A one-client source route may now be empty.
-        best_routes = [
-            route
-            for route in best_routes
-            if route
-        ]
-
-        # Use the exact delta during the search.
-        best_cost += best_delta
-    # Recalculate once at the end as a consistency safeguard.
-    best_cost = calculate_routes_matrix_cost(
-        matrix,
-        best_routes,
-    )
-
-    return best_cost, best_routes
-
-def perturb_routes(
-    routes: list[list[int]],
-    client_demands,
-    vehicle_capacity: float,
-    rng: np.random.Generator,
-    *,
-    duration_matrix: np.ndarray | None = None,
-    max_route_duration_min: float | None = None,
-    route_start_time_per_route_min: float = 0.0,
-    perturbation_moves: int = 2,
-    max_attempts_per_move: int = 100,
-) -> list[list[int]]:
-    """
-    Generate a feasible perturbed solution.
-
-    When multiple routes exist, the operator attempts random inter-route
-    relocations. With a single route, it reverses a random route segment.
-    Perturbations do not need to improve the objective value.
-    """
-
-    if perturbation_moves <= 0:
-        raise ValueError("perturbation_moves must be greater than zero.")
-
-    demands = np.asarray(client_demands, dtype=float)
-    perturbed_routes = [route.copy() for route in routes if route]
-
-    if not perturbed_routes:
-        return []
-
-    for _ in range(perturbation_moves):
-
-        # With one route, perturb its internal order.
-        if len(perturbed_routes) == 1:
-            route = perturbed_routes[0]
-
-            if len(route) < 2:
-                continue
-
-            start_index, end_index = sorted(
-                rng.choice(len(route), size=2, replace=False)
-            )
-
-            candidate_route = (
-                route[:start_index]
-                + list(reversed(route[start_index:end_index + 1]))
-                + route[end_index + 1:]
-            )
-
-            if _is_route_duration_feasible(
-                candidate_route,
-                duration_matrix,
-                max_route_duration_min,
-                route_start_time_per_route_min,
-            ):
-                perturbed_routes[0] = candidate_route
-
-            continue
-
-        # With multiple routes, attempt a random inter-route relocation.
-        move_completed = False
-
-        for _attempt in range(max_attempts_per_move):
-            source_route_index, destination_route_index = rng.choice(
-                len(perturbed_routes),
-                size=2,
-                replace=False,
-            )
-
-            source_route = perturbed_routes[source_route_index]
-            destination_route = perturbed_routes[destination_route_index]
-
-            if not source_route:
-                continue
-
-            source_position = int(rng.integers(len(source_route)))
-            client = source_route[source_position]
-            client_demand = float(demands[client - 1])
-
-            destination_load = _calculate_route_load(
-                destination_route,
-                demands,
-            )
-
-            if destination_load + client_demand > vehicle_capacity:
-                continue
-
-            insertion_position = int(
-                rng.integers(len(destination_route) + 1)
-            )
-
-            reduced_source_route = (
-                source_route[:source_position]
-                + source_route[source_position + 1:]
-            )
-
-            expanded_destination_route = (
-                destination_route[:insertion_position]
-                + [client]
-                + destination_route[insertion_position:]
-            )
-
-            if reduced_source_route and not _is_route_duration_feasible(
-                reduced_source_route,
-                duration_matrix,
-                max_route_duration_min,
-                route_start_time_per_route_min,
-            ):
-                continue
-
-            if not _is_route_duration_feasible(
-                expanded_destination_route,
-                duration_matrix,
-                max_route_duration_min,
-                route_start_time_per_route_min,
-            ):
-                continue
-
-            candidate_routes = [
-                route.copy()
-                for route in perturbed_routes
-            ]
-
-            candidate_routes[source_route_index] = reduced_source_route
-            candidate_routes[destination_route_index] = (
-                expanded_destination_route
-            )
-
-            perturbed_routes = [
-                route
-                for route in candidate_routes
-                if route
-            ]
-
-            move_completed = True
-            break
-
-        if not move_completed:
-            # No feasible random relocation was found for this move.
-            continue
-
-    return perturbed_routes
-
 def _local_search(
     routes: list[list[int]],
     matrix: np.ndarray,
-    vehicle_capacity: float,
-    client_demands: np.ndarray,
     *,
     duration_matrix: np.ndarray | None = None,
     max_route_duration_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
 ) -> tuple[float, list[list[int]]]:
-    """
-    Improve a feasible solution using the configured local-search operators.
-
-    The search applies:
-        1. Intra-route 2-opt.
-        2. Inter-route relocate.
-        3. Intra-route 2-opt again.
-    """
+    
     print(
         f"Starting local search for {len(routes)} routes "
         f"and {sum(len(route) for route in routes)} clients..."
     )
     local_search_start = perf_counter()
-    print("Local search stage 1/3: intra-route 2-opt...")
+    print("Local search: intra-route 2-opt...")
     stage_start = perf_counter()
-    _, two_opt_routes = improve_routes_two_opt(
+    final_cost, final_routes = improve_routes_two_opt(
         routes,
         matrix,
         duration_matrix=duration_matrix,
@@ -517,36 +136,7 @@ def _local_search(
         route_start_time_per_route_min=route_start_time_per_route_min,
     )
     print(
-        f"Local search stage 1/3 completed in "
-        f"{perf_counter() - stage_start:.2f} seconds."
-    )
-    print("Local search stage 2/3: inter-route relocate...")
-    stage_start = perf_counter()
-
-    _, relocate_routes = improve_routes_relocate(
-        two_opt_routes,
-        matrix,
-        vehicle_capacity,
-        client_demands,
-        duration_matrix=duration_matrix,
-        max_route_duration_min=max_route_duration_min,
-        route_start_time_per_route_min=route_start_time_per_route_min,
-    )
-    print(
-        f"Local search stage 2/3 completed in "
-        f"{perf_counter() - stage_start:.2f} seconds."
-    )
-    print("Local search stage 3/3: final intra-route 2-opt...")
-    stage_start = perf_counter()
-    final_cost, final_routes = improve_routes_two_opt(
-        relocate_routes,
-        matrix,
-        duration_matrix=duration_matrix,
-        max_route_duration_min=max_route_duration_min,
-        route_start_time_per_route_min=route_start_time_per_route_min,
-    )
-    print(
-        f"Local search stage 3/3 completed in "
+        f"Local search stage completed in "
         f"{perf_counter() - stage_start:.2f} seconds."
     )
 
@@ -555,6 +145,136 @@ def _local_search(
         f"{perf_counter() - local_search_start:.2f} seconds."
     )
     return final_cost, final_routes
+
+
+def _select_routes_to_destroy(
+    n_routes: int,
+    destruction_percentage: float,
+    rng: np.random.Generator,
+) -> list[int]:
+    """Return the indices of the routes selected for destruction."""
+
+    n_to_destroy = round((destruction_percentage / 100.0) * n_routes)
+    n_to_destroy = min(max(n_to_destroy, 1), n_routes)
+
+    return rng.choice(
+        n_routes,
+        size=n_to_destroy,
+        replace=False,
+    ).tolist()
+
+
+def destroy_routes(
+    routes: list[list[int]],
+    destruction_percentage: float,
+    rng: np.random.Generator,
+) -> tuple[list[list[int]], list[int]]:
+    """
+    Destroy ``destruction_percentage``% of the routes, chosen at random.
+    """
+
+    if not routes:
+        return [], []
+
+    destroy_indices = set(
+        _select_routes_to_destroy(len(routes), destruction_percentage, rng)
+    )
+
+    remaining_routes = [
+        route.copy()
+        for index, route in enumerate(routes)
+        if index not in destroy_indices
+    ]
+
+    freed_clients = [
+        client
+        for index, route in enumerate(routes)
+        if index in destroy_indices
+        for client in route
+    ]
+
+    return remaining_routes, freed_clients
+
+
+def reconstruct_routes(
+    freed_clients: list[int],
+    matrix: np.ndarray,
+    vehicle_capacity: float,
+    client_demands: np.ndarray,
+    *,
+    duration_matrix: np.ndarray | None = None,
+    max_route_duration_min: float | None = None,
+    route_start_time_per_route_min: float = 0.0,
+    cws_allow_route_reversal: bool = False,
+    show_progress: bool = False,
+) -> list[list[int]]:
+
+    if not freed_clients:
+        return []
+
+    n_freed = len(freed_clients)
+    local_to_original = dict(enumerate(freed_clients, start=1))
+
+    original_indices = [0] + freed_clients
+    sub_matrix = matrix[np.ix_(original_indices, original_indices)]
+    sub_duration_matrix = (
+        duration_matrix[np.ix_(original_indices, original_indices)]
+        if duration_matrix is not None
+        else None
+    )
+    sub_demands = np.array(
+        [client_demands[client - 1] for client in freed_clients],
+        dtype=float,
+    )
+
+    _, sub_routes = clarke_wright_savings(
+        matrix=sub_matrix,
+        n_clients=n_freed,
+        vehicle_capacity=vehicle_capacity,
+        client_demands=sub_demands,
+        duration_matrix=sub_duration_matrix,
+        max_route_duration_min=max_route_duration_min,
+        route_start_time_per_route_min=route_start_time_per_route_min,
+        show_progress=show_progress,
+        allow_route_reversal=cws_allow_route_reversal,
+    )
+
+    return [
+        [local_to_original[local_id] for local_id in route]
+        for route in sub_routes
+    ]
+
+
+def destruction_reconstruction(
+    routes: list[list[int]],
+    matrix: np.ndarray,
+    vehicle_capacity: float,
+    client_demands: np.ndarray,
+    destruction_percentage: float,
+    rng: np.random.Generator,
+    *,
+    duration_matrix: np.ndarray | None = None,
+    max_route_duration_min: float | None = None,
+    route_start_time_per_route_min: float = 0.0,
+    cws_allow_route_reversal: bool = False,
+) -> list[list[int]]:
+
+    remaining_routes, freed_clients = destroy_routes(
+        routes, destruction_percentage, rng,
+    )
+
+    new_routes = reconstruct_routes(
+        freed_clients,
+        matrix,
+        vehicle_capacity,
+        client_demands,
+        duration_matrix=duration_matrix,
+        max_route_duration_min=max_route_duration_min,
+        route_start_time_per_route_min=route_start_time_per_route_min,
+        cws_allow_route_reversal=cws_allow_route_reversal,
+    )
+
+    return remaining_routes + new_routes
 
 
 def iterated_local_search(
@@ -568,7 +288,8 @@ def iterated_local_search(
     route_start_time_per_route_min: float = 0.0,
     max_iterations: int = 100,
     max_iterations_without_improvement: int | None = 20,
-    perturbation_moves: int = 2,
+    destruction_percentage_step: float = 10.0,
+    max_destruction_percentage: float = 100.0,
     random_seed: int | None = None,
     show_progress: bool = False,
     cws_allow_route_reversal: bool = False,
@@ -578,41 +299,14 @@ def iterated_local_search(
     Build a feasible routing solution using Iterated Local Search.
 
     Clarke-Wright Savings generates the initial solution. Local search then
-    improves that solution using 2-opt and inter-route relocate operators.
-    Repeated perturbations allow the search to explore different regions of
-    the solution space.
+    improves it with 2-opt. Perturbation is a destroy-and-rebuild step: a
+    growing percentage of routes is removed at random and rebuilt with
+    Clarke-Wright Savings on the freed clients.
 
-    Parameters
-    ----------
-    matrix
-        Distance or cost matrix. Index 0 represents the depot.
-    n_clients
-        Number of clients, indexed from 1 to n_clients.
-    vehicle_capacity
-        Maximum capacity allowed on each route.
-    client_demands
-        Demand associated with each client. Unit demand is assumed when this
-        argument is omitted.
-    duration_matrix
-        Travel-time matrix in minutes.
-    max_route_duration_min
-        Maximum allowed duration for each route.
-    route_start_time_per_route_min
-        Preparation or loading time added to every route.
-    max_iterations
-        Maximum number of perturbation and local-search iterations.
-    max_iterations_without_improvement
-        Stop early after this number of consecutive iterations without
-        improving the best solution. Use None to disable early stopping.
-    perturbation_moves
-        Number of feasible random moves attempted during each perturbation.
-    random_seed
-        Seed used to obtain reproducible perturbations.
-
-    Returns
-    -------
-    tuple[float, list[list[int]]]
-        Best total routing distance and best feasible routes found.
+    A candidate solution is only accepted when it strictly improves the
+    current base solution. When it does not, the base solution is kept
+    unchanged and the destruction percentage grows for the next attempt,
+    resetting after any improvement.
     """
 
     if max_iterations <= 0:
@@ -627,8 +321,10 @@ def iterated_local_search(
             "or None."
         )
 
-    if perturbation_moves <= 0:
-        raise ValueError("perturbation_moves must be greater than zero.")
+    if destruction_percentage_step <= 0:
+        raise ValueError(
+            "destruction_percentage_step must be greater than zero."
+        )
 
     demands = (
         np.ones(n_clients, dtype=float)
@@ -646,7 +342,6 @@ def iterated_local_search(
 
     rng = np.random.default_rng(random_seed)
 
-    # Step 1: construct the initial solution with Clarke-Wright.
     _, initial_routes = clarke_wright_savings(
         matrix=matrix,
         n_clients=n_clients,
@@ -659,12 +354,9 @@ def iterated_local_search(
         allow_route_reversal=cws_allow_route_reversal,
     )
 
-    # Step 2: move the initial solution to a local optimum.
     current_cost, current_routes = _local_search(
         initial_routes,
         matrix,
-        vehicle_capacity,
-        demands,
         duration_matrix=duration_matrix,
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
@@ -673,9 +365,9 @@ def iterated_local_search(
     best_cost = current_cost
     best_routes = [route.copy() for route in current_routes]
 
+    destruction_percentage = 0.0
     iterations_without_improvement = 0
 
-    # Step 3: repeatedly perturb and improve the current solution.
     iteration_progress = tqdm(
         range(max_iterations),
         desc="ILS optimization",
@@ -686,45 +378,50 @@ def iterated_local_search(
     iterations_completed = 0
     for _iteration in iteration_progress:
         iterations_completed += 1
-        perturbed_routes = perturb_routes(
+
+        destruction_percentage = min(
+            destruction_percentage + destruction_percentage_step,
+            max_destruction_percentage,
+        )
+
+        perturbed_routes = destruction_reconstruction(
             current_routes,
-            demands,
+            matrix,
             vehicle_capacity,
+            demands,
+            destruction_percentage,
             rng,
             duration_matrix=duration_matrix,
             max_route_duration_min=max_route_duration_min,
             route_start_time_per_route_min=route_start_time_per_route_min,
-            perturbation_moves=perturbation_moves,
+            cws_allow_route_reversal=cws_allow_route_reversal,
         )
 
         candidate_cost, candidate_routes = _local_search(
             perturbed_routes,
             matrix,
-            vehicle_capacity,
-            demands,
             duration_matrix=duration_matrix,
             max_route_duration_min=max_route_duration_min,
             route_start_time_per_route_min=route_start_time_per_route_min,
         )
 
-        # Classical ILS acceptance: continue searching from the new local
-        # optimum, even when it is worse than the best solution found.
-        current_cost = candidate_cost
-        current_routes = [route.copy() for route in candidate_routes]
+        if candidate_cost < current_cost - 1e-9:
+            current_cost = candidate_cost
+            current_routes = [route.copy() for route in candidate_routes]
 
-        if candidate_cost < best_cost - 1e-9:
-            best_cost = candidate_cost
-            best_routes = [
-                route.copy()
-                for route in candidate_routes
-            ]
+            destruction_percentage = 0.0
             iterations_without_improvement = 0
+
+            if candidate_cost < best_cost - 1e-9:
+                best_cost = candidate_cost
+                best_routes = [route.copy() for route in candidate_routes]
         else:
             iterations_without_improvement += 1
 
         if show_progress:
             iteration_progress.set_postfix(
                 best_km=f"{best_cost:.3f}",
+                p=f"{destruction_percentage:.0f}%",
                 no_improvement=iterations_without_improvement,
             )
 

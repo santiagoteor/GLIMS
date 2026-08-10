@@ -123,8 +123,11 @@ def main() -> None:
         ils_max_iterations_without_improvement=(
             config.routing.ils_max_no_improvement
         ),
-        ils_perturbation_moves=(
-            config.routing.ils_perturbation_moves
+        ils_destruction_percentage_step=(
+            config.routing.ils_destruction_percentage_step
+        ),
+        ils_max_destruction_percentage=(
+            config.routing.ils_max_destruction_percentage
         ),
         ils_random_seed=config.routing.ils_random_seed,
     )
@@ -383,3 +386,4 @@ def _run_city_experiment(
 
 if __name__ == "__main__":
     main()
+    

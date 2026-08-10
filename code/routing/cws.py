@@ -1,4 +1,3 @@
-
 import numpy as np
 from tqdm.auto import tqdm
 from code.common.constants import SERVICE_TIME_PER_STOP_MIN
@@ -22,11 +21,8 @@ def clarke_wright_savings(
     Build capacity- and duration-feasible routes using parallel Clarke-Wright.
 
     Matrix index 0 is the depot and client indices are 1..n_clients.
-    Each returned route represents one vehicle that leaves the depot once
-    and returns once. Multiple routes therefore mean multiple vehicles.
-
-    When ``duration_matrix`` and ``max_route_duration_min`` are supplied,
-    every complete depot-route-depot tour must fit within the duration limit.
+    Savings generation and sorting are vectorized with numpy; route merging
+    remains a sequential pass (it depends on state built incrementally).
     """
 
     if n_clients <= 0:
@@ -114,68 +110,63 @@ def clarke_wright_savings(
         for client in range(1, n_clients + 1)
     }
 
-    savings = []
-
     print(
         f"Generating directed CWS savings for "
         f"{n_clients} clients "
-        f"({n_clients * (n_clients - 1):,} candidate pairs)..."
+        f"({n_clients * (n_clients - 1):,} candidate pairs, vectorized)..."
     )
-
     savings_start = perf_counter()
-    
-    # Directed savings support asymmetric OSRM matrices.
-    client_indices = tqdm(
-        range(1, n_clients + 1),
-        desc="CWS savings construction",
-        unit="client",
-        disable=not show_progress,
-        mininterval=0.5,
-        leave=False,
+
+    client_range = np.arange(1, n_clients + 1)
+    depot_to_client = matrix[0, client_range]          # matrix[0, j]
+    client_to_depot = matrix[client_range, 0]          # matrix[i, 0]
+    inner_matrix = matrix[np.ix_(client_range, client_range)]  # matrix[i, j]
+
+    savings_matrix = (
+        client_to_depot[:, None] + depot_to_client[None, :] - inner_matrix
     )
-    for i in client_indices:
-        for j in range(1, n_clients + 1):
-            if i == j:
-                continue
+    np.fill_diagonal(savings_matrix, -np.inf)          # exclude i == j
 
-            saving = (
-                matrix[i, 0]
-                + matrix[0, j]
-                - matrix[i, j]
-            )
+    finite_mask = np.isfinite(savings_matrix)
+    flat_savings = savings_matrix[finite_mask]
+    flat_a, flat_b = np.nonzero(finite_mask)            # 0-indexed positions
 
-            if np.isfinite(saving):
-                savings.append((saving, i, j))
+    flat_i = flat_a + 1                                 # back to client ids
+    flat_j = flat_b + 1
+
     savings_generation_seconds = perf_counter() - savings_start
-
     print(
-        f"Generated {len(savings):,} CWS savings in "
+        f"Generated {len(flat_savings):,} CWS savings in "
         f"{savings_generation_seconds:.2f} seconds."
     )
 
     print("Sorting CWS savings...")
     sorting_start = perf_counter()
-    
-    savings.sort(reverse=True, key=lambda item: item[0])
-    sorting_seconds = perf_counter() - sorting_start
 
-    print(
-        f"CWS savings sorted in {sorting_seconds:.2f} seconds."
-    )
+    order = np.argsort(flat_savings)[::-1]
+
+    sorted_i = flat_i[order].tolist()   # .tolist(): plain Python ints,
+    sorted_j = flat_j[order].tolist()   # much cheaper to loop over than
+                                          # numpy scalars.
+
+    sorting_seconds = perf_counter() - sorting_start
+    print(f"CWS savings sorted in {sorting_seconds:.2f} seconds.")
 
     print("Starting CWS route merging...")
     merging_start = perf_counter()
-    
+
+    n_pairs = len(sorted_i)
     merge_progress = tqdm(
-        savings,
+        zip(sorted_i, sorted_j),
+        total=n_pairs,
         desc="CWS route merging",
         unit="saving",
         disable=not show_progress,
         mininterval=0.5,
-        miniters=max(1, len(savings) // 1000),
+        miniters=max(1, n_pairs // 1000),
         leave=False,
     )
-    for _saving, i, j in merge_progress:
+    for i, j in merge_progress:
         route_i_id = route_of[i]
         route_j_id = route_of[j]
 

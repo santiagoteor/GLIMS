@@ -118,7 +118,8 @@ def simulate_neighborhood(
         ils_max_iterations_without_improvement=(
             routing_config.ils_max_iterations_without_improvement
         ),
-        ils_perturbation_moves=routing_config.ils_perturbation_moves,
+        ils_destruction_percentage_step=routing_config.ils_destruction_percentage_step,
+        ils_max_destruction_percentage=routing_config.ils_max_destruction_percentage,
         ils_random_seed=routing_config.ils_random_seed,
         traffic_profile=traffic_profile,
         time_traffic_provider=time_traffic_provider,
@@ -170,14 +171,6 @@ def simulate_neighborhood(
             f"{customer_count} customers / {package_count} packages remain."
         )
 
-    # M1 and M2 solve the same direct-delivery routing problem whenever their
-    # vehicle capacities are equal. All other routing inputs are shared here by
-    # construction: depot, filtered clients, demands, OSRM mode, loading time,
-    # routing algorithm/settings, traffic profile, shift, and random seed.
-    #
-    # In that case, reuse the complete M1 route plan instead of running
-    # CWS/ILS a second time. If capacities differ in a future configuration,
-    # M2 automatically falls back to an independent routing calculation.
     m1_capacity = float(parameters["FURGONETA_CONV"]["capacidad"])
     m2_capacity = float(parameters["FURGONETA_ELEC"]["capacidad"])
 
@@ -188,6 +181,43 @@ def simulate_neighborhood(
         f"M1 capacity={m1_capacity:g}, "
         f"M2 capacity={m2_capacity:g}."
     )
+
+    if direct_routing_reusable:
+        m2_plan = m1_plan
+        print(
+            "M2 reusing M1 routing plan: YES "
+            "(identical direct-routing inputs and constraints)."
+        )
+    else:
+        print(
+            "M2 reusing M1 routing plan: NO "
+            "(vehicle capacities differ; running independent M2 routing)."
+        )
+
+        m2_plan = route_planner.build_capacity_plan(
+            depot_latitude=direct_cc_lat,
+            depot_longitude=direct_cc_lon,
+            clients=demand_points,
+            transport_mode="driving",
+            vehicle_capacity=m2_capacity,
+            client_demands=client_demands,
+            route_start_time_per_route_min=DIRECT_VAN_LOADING_TIME_PER_ROUTE_MIN,
+            routing_algorithm=routing_config.algorithm,
+            cws_allow_route_reversal=routing_config.cws_allow_route_reversal,
+            ils_max_iterations=routing_config.ils_max_iterations,
+            ils_max_iterations_without_improvement=(
+                routing_config.ils_max_iterations_without_improvement
+            ),
+            ils_destruction_percentage_step=routing_config.ils_destruction_percentage_step,
+            ils_max_destruction_percentage=routing_config.ils_max_destruction_percentage,
+            ils_random_seed=routing_config.ils_random_seed,
+            traffic_profile=traffic_profile,
+            time_traffic_provider=time_traffic_provider,
+            traffic_zone=neighborhood_name,
+            shift_start=shift_start,
+            shift_end=shift_end,
+            show_progress=show_progress,
+        )
 
     if direct_routing_reusable:
         m2_plan = m1_plan

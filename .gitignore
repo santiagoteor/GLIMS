@@ -49,6 +49,9 @@ code/notebooks/
 code/simulation/osmnx_simulator.py
 code/simulation/simulator.py
 
+# Addings
+code/simulation/executer.txt
+
 # Internal documentation
 docs/docs_mar_san/
 
