@@ -253,7 +253,7 @@ def _run_city_experiment(
             profile=config.osrm_profile,
         )
 
-        results_df, model_detail_frames = simulate_city(
+        results_df, model_detail_frames, audit_frames = simulate_city(
             city=active_city,
             demand_scenario=config.demand_scenario,
             instance_size=config.instance_size,
@@ -328,6 +328,27 @@ def _run_city_experiment(
                     f"{model_code} route details saved to: "
                     f"{detail_path.resolve()}"
                 )
+
+        audit_folder = experiment_folder / "audit"
+        audit_folder.mkdir(parents=True, exist_ok=True)
+
+        for audit_name, audit_df in audit_frames.items():
+            audit_df = audit_df.assign(
+                experiment_id=experiment_id,
+                routing_algorithm=routing_config.algorithm,
+            )
+
+            audit_path = audit_folder / f"{audit_name}.csv"
+            audit_df.to_csv(
+                audit_path,
+                index=False,
+                encoding="utf-8-sig",
+            )
+
+            print(
+                f"Audit output saved to: "
+                f"{audit_path.resolve()}"
+            )
 
         finished_at = datetime.now()
         if config.output.save_metadata:

@@ -4,8 +4,8 @@
   "zones": [
     "l'Eixample"
   ],
-  "demand_scenario": "low",
-  "instance_size": 1000,
+  "demand_scenario": "high",
+  "instance_size": 300,
   "osrm_profile": "driving",
   "routing": {
     "algorithm": "ils",
