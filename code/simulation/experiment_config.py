@@ -14,7 +14,8 @@ class RoutingExperimentConfig:
     cws_allow_route_reversal: bool = False
     ils_max_iterations: int = 100
     ils_max_no_improvement: int | None = 20
-    ils_perturbation_moves: int = 2
+    ils_destruction_percentage_step: int = 10
+    ils_max_destruction_percentage: int = 100
     ils_random_seed: int | None = 42
 
 
@@ -136,8 +137,10 @@ def validate_experiment_config(config: ExperimentConfig) -> None:
         raise ValueError("routing.algorithm must be 'cws' or 'ils'.")
     if config.routing.ils_max_iterations <= 0:
         raise ValueError("ils_max_iterations must be greater than zero.")
-    if config.routing.ils_perturbation_moves < 0:
-        raise ValueError("ils_perturbation_moves cannot be negative.")
+    if config.routing.ils_destruction_percentage_step <= 0:
+        raise ValueError("ils_destruction_percentage_step must be greater than zero.")
+    if not (0 < config.routing.ils_max_destruction_percentage <= 100):
+        raise ValueError("ils_max_destruction_percentage must be between 0 (exclusive) and 100 (inclusive).")
     if config.facility_filter.initial_buffer_m < 0:
         raise ValueError(
             "facility_filter.initial_buffer_m cannot be negative."
@@ -205,9 +208,13 @@ def resolve_experiment_config(
             overrides.get("ils_max_no_improvement"),
             base.routing.ils_max_no_improvement,
         ),
-        ils_perturbation_moves=_pick(
-            overrides.get("ils_perturbation_moves"),
-            base.routing.ils_perturbation_moves,
+        ils_destruction_percentage_step=_pick(
+            overrides.get("ils_destruction_percentage_step"),
+            base.routing.ils_destruction_percentage_step,
+        ),
+        ils_max_destruction_percentage=_pick(
+            overrides.get("ils_max_destruction_percentage"),
+            base.routing.ils_max_destruction_percentage,
         ),
         ils_random_seed=_pick(
             overrides.get("ils_random_seed"),

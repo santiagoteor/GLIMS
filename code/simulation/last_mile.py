@@ -163,7 +163,8 @@ def calculate_microhub_last_mile(
             ils_max_iterations_without_improvement=(
                 routing_config.ils_max_iterations_without_improvement
             ),
-            ils_perturbation_moves=routing_config.ils_perturbation_moves,
+            ils_destruction_percentage_step=routing_config.ils_destruction_percentage_step,
+            ils_max_destruction_percentage=routing_config.ils_max_destruction_percentage,
             ils_random_seed=routing_config.ils_random_seed,
             show_progress=show_progress,
         )
@@ -265,7 +266,8 @@ def calculate_pudo_last_mile(
             ils_max_iterations_without_improvement=(
                 routing_config.ils_max_iterations_without_improvement
             ),
-            ils_perturbation_moves=routing_config.ils_perturbation_moves,
+            ils_destruction_percentage_step=routing_config.ils_destruction_percentage_step,
+            ils_max_destruction_percentage=routing_config.ils_max_destruction_percentage,
             ils_random_seed=routing_config.ils_random_seed,
             show_progress=show_progress,
         )

@@ -93,7 +93,8 @@ class CapacityAwareOsrmRouter:
         cws_allow_route_reversal: bool = False,
         ils_max_iterations: int = 100,
         ils_max_iterations_without_improvement: int | None = 20,
-        ils_perturbation_moves: int = 2,
+        ils_destruction_percentage_step: float = 10.0,
+        ils_max_destruction_percentage: float = 100.0,        
         ils_random_seed: int | None = 42,
         traffic_profile: TrafficProfile | None = None,
         time_traffic_provider: TimeTrafficProvider | None = None,
@@ -281,8 +282,8 @@ class CapacityAwareOsrmRouter:
                 max_iterations_without_improvement=(
                     ils_max_iterations_without_improvement
                 ),
-                perturbation_moves=ils_perturbation_moves,
-                random_seed=ils_random_seed,
+                destruction_percentage_step=ils_destruction_percentage_step,
+                max_destruction_percentage=ils_max_destruction_percentage,                random_seed=ils_random_seed,
                 show_progress=show_progress,
                 cws_allow_route_reversal=cws_allow_route_reversal,
                 return_stats=True,
@@ -549,7 +550,8 @@ def calculate_facility_supply_route(
         ils_max_iterations_without_improvement=(
             routing_config.ils_max_iterations_without_improvement
         ),
-        ils_perturbation_moves=routing_config.ils_perturbation_moves,
+        ils_destruction_percentage_step=routing_config.ils_destruction_percentage_step,
+        ils_max_destruction_percentage=routing_config.ils_max_destruction_percentage,        
         ils_random_seed=routing_config.ils_random_seed,
         traffic_profile=traffic_profile,
         time_traffic_provider=time_traffic_provider,
