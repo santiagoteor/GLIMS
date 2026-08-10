@@ -13,6 +13,7 @@ from code.routing.osrm_router import (
     select_logistics_center,
 )
 from code.simulation.data_loader import load_city_data, load_classified_locations, load_demand_instance
+from code.simulation.audit import audit_customer_routes, build_unroutable_customer_rows
 from code.simulation.demand import calculate_demand_weighted_centroid
 from code.simulation.exporters import build_route_detail_rows
 from code.simulation.last_mile import (
@@ -73,12 +74,22 @@ def simulate_neighborhood(
 ):
     """Run the five models using demand stops and classified facilities."""
 
+    original_demand_points = demand_points.reset_index(drop=True).copy()
     customer_count = len(demand_points)
     package_count = int(demand_points["Demand"].sum())
     client_demands = demand_points["Demand"].to_numpy(dtype=float)
 
     if customer_count == 0 or package_count == 0:
-        return [], {model: [] for model in ("M1", "M2", "M3", "M4", "M5")}
+        return (
+            [],
+            {model: [] for model in ("M1", "M2", "M3", "M4", "M5")},
+            {
+                "customer_route_audit": [],
+                "route_customer_summary": [],
+                "routing_integrity_summary": [],
+                "unroutable_customers": [],
+            },
+        )
 
     route_planner = CapacityAwareOsrmRouter(city)
 
@@ -160,30 +171,89 @@ def simulate_neighborhood(
             f"{customer_count} customers / {package_count} packages remain."
         )
 
-    m2_plan = route_planner.build_capacity_plan(
-        depot_latitude=direct_cc_lat,
-        depot_longitude=direct_cc_lon,
-        clients=demand_points,
-        transport_mode="driving",
-        vehicle_capacity=parameters["FURGONETA_ELEC"]["capacidad"],
-        client_demands=client_demands,
-        route_start_time_per_route_min=DIRECT_VAN_LOADING_TIME_PER_ROUTE_MIN,
-        routing_algorithm=routing_config.algorithm,
-        cws_allow_route_reversal=routing_config.cws_allow_route_reversal,
-        ils_max_iterations=routing_config.ils_max_iterations,
-        ils_max_iterations_without_improvement=(
-            routing_config.ils_max_iterations_without_improvement
-        ),
-        ils_destruction_percentage_step=routing_config.ils_destruction_percentage_step,
-        ils_max_destruction_percentage=routing_config.ils_max_destruction_percentage,
-        ils_random_seed=routing_config.ils_random_seed,
-        traffic_profile=traffic_profile,
-        time_traffic_provider=time_traffic_provider,
-        traffic_zone=neighborhood_name,
-        shift_start=shift_start,
-        shift_end=shift_end,
-        show_progress=show_progress,
+    m1_capacity = float(parameters["FURGONETA_CONV"]["capacidad"])
+    m2_capacity = float(parameters["FURGONETA_ELEC"]["capacidad"])
+
+    direct_routing_reusable = abs(m1_capacity - m2_capacity) <= 1e-9
+
+    print(
+        "M2 routing reuse check: "
+        f"M1 capacity={m1_capacity:g}, "
+        f"M2 capacity={m2_capacity:g}."
     )
+
+    if direct_routing_reusable:
+        m2_plan = m1_plan
+        print(
+            "M2 reusing M1 routing plan: YES "
+            "(identical direct-routing inputs and constraints)."
+        )
+    else:
+        print(
+            "M2 reusing M1 routing plan: NO "
+            "(vehicle capacities differ; running independent M2 routing)."
+        )
+
+        m2_plan = route_planner.build_capacity_plan(
+            depot_latitude=direct_cc_lat,
+            depot_longitude=direct_cc_lon,
+            clients=demand_points,
+            transport_mode="driving",
+            vehicle_capacity=m2_capacity,
+            client_demands=client_demands,
+            route_start_time_per_route_min=DIRECT_VAN_LOADING_TIME_PER_ROUTE_MIN,
+            routing_algorithm=routing_config.algorithm,
+            cws_allow_route_reversal=routing_config.cws_allow_route_reversal,
+            ils_max_iterations=routing_config.ils_max_iterations,
+            ils_max_iterations_without_improvement=(
+                routing_config.ils_max_iterations_without_improvement
+            ),
+            ils_destruction_percentage_step=routing_config.ils_destruction_percentage_step,
+            ils_max_destruction_percentage=routing_config.ils_max_destruction_percentage,
+            ils_random_seed=routing_config.ils_random_seed,
+            traffic_profile=traffic_profile,
+            time_traffic_provider=time_traffic_provider,
+            traffic_zone=neighborhood_name,
+            shift_start=shift_start,
+            shift_end=shift_end,
+            show_progress=show_progress,
+        )
+
+    if direct_routing_reusable:
+        m2_plan = m1_plan
+        print(
+            "M2 reusing M1 routing plan: YES "
+            "(identical direct-routing inputs and constraints)."
+        )
+    else:
+        print(
+            "M2 reusing M1 routing plan: NO "
+            "(vehicle capacities differ; running independent M2 routing)."
+        )
+
+        m2_plan = route_planner.build_capacity_plan(
+            depot_latitude=direct_cc_lat,
+            depot_longitude=direct_cc_lon,
+            clients=demand_points,
+            transport_mode="driving",
+            vehicle_capacity=m2_capacity,
+            client_demands=client_demands,
+            route_start_time_per_route_min=DIRECT_VAN_LOADING_TIME_PER_ROUTE_MIN,
+            routing_algorithm=routing_config.algorithm,
+            cws_allow_route_reversal=routing_config.cws_allow_route_reversal,
+            ils_max_iterations=routing_config.ils_max_iterations,
+            ils_max_iterations_without_improvement=(
+                routing_config.ils_max_iterations_without_improvement
+            ),
+            ils_perturbation_moves=routing_config.ils_perturbation_moves,
+            ils_random_seed=routing_config.ils_random_seed,
+            traffic_profile=traffic_profile,
+            time_traffic_provider=time_traffic_provider,
+            traffic_zone=neighborhood_name,
+            shift_start=shift_start,
+            shift_end=shift_end,
+            show_progress=show_progress,
+        )
 
     # Direct models have no separate trunk leg: CWS includes CC departures/returns.
     zero_trunk = 0.0
@@ -402,6 +472,58 @@ def simulate_neighborhood(
         "M5": m5_supply_detail_rows + m5_customer_detail_rows,
     }
 
+    # ------------------------------------------------------------
+    # Customer-routing audit (informational; never blocks simulation)
+    # ------------------------------------------------------------
+
+    excluded_positions = list(m1_plan.unroutable_client_positions)
+
+    unroutable_customer_rows = build_unroutable_customer_rows(
+        city=city,
+        neighborhood_name=neighborhood_name,
+        original_clients=original_demand_points,
+        excluded_positions=excluded_positions,
+    )
+
+    audit_specs = (
+        ("M1", "direct_delivery", m1_detail_rows),
+        ("M2", "direct_delivery", m2_detail_rows),
+        ("M3", "cycling_last_mile", m3_bike_detail_rows),
+        ("M4", "walking_last_mile", m4_walking_detail_rows),
+        ("M5", "customer_collection", m5_customer_detail_rows),
+    )
+
+    customer_route_audit_rows = []
+    route_customer_summary_rows = []
+    routing_integrity_summary_rows = []
+
+    for audit_model, audit_leg, audit_route_rows in audit_specs:
+        (
+            model_customer_rows,
+            model_route_rows,
+            model_summary_row,
+        ) = audit_customer_routes(
+            city=city,
+            neighborhood_name=neighborhood_name,
+            model=audit_model,
+            leg=audit_leg,
+            original_clients=original_demand_points,
+            routable_clients=demand_points,
+            route_detail_rows=audit_route_rows,
+            excluded_positions=excluded_positions,
+        )
+
+        customer_route_audit_rows.extend(model_customer_rows)
+        route_customer_summary_rows.extend(model_route_rows)
+        routing_integrity_summary_rows.append(model_summary_row)
+
+    audit_details = {
+        "customer_route_audit": customer_route_audit_rows,
+        "route_customer_summary": route_customer_summary_rows,
+        "routing_integrity_summary": routing_integrity_summary_rows,
+        "unroutable_customers": unroutable_customer_rows,
+    }
+
     summary_results = [
         simulate_m1(
             city=city,
@@ -467,7 +589,7 @@ def simulate_neighborhood(
         ),
     ]
 
-    return summary_results, model_details
+    return summary_results, model_details, audit_details
 
 
 def simulate_city(
@@ -509,6 +631,12 @@ def simulate_city(
  
     all_results = []
     all_model_details = {model: [] for model in ("M1", "M2", "M3", "M4", "M5")}
+    all_audit_details = {
+        "customer_route_audit": [],
+        "route_customer_summary": [],
+        "routing_integrity_summary": [],
+        "unroutable_customers": [],
+    }
  
     if active_zones is not None:
         boundaries = select_zones(boundaries, active_zones)
@@ -612,7 +740,7 @@ def simulate_city(
             f"capacity mode: {pudo_capacity_mode}"
         )
 
-        results, model_details = simulate_neighborhood(
+        results, model_details, audit_details = simulate_neighborhood(
             city=city,
             neighborhood_name=neighborhood_name,
             demand_points=demand_points,
@@ -638,6 +766,8 @@ def simulate_city(
         all_results.extend(results)
         for model_code, detail_rows in model_details.items():
             all_model_details[model_code].extend(detail_rows)
+        for audit_name, audit_rows in audit_details.items():
+            all_audit_details[audit_name].extend(audit_rows)
         print(
             f"{neighborhood_name} ({zone_type}): {len(demand_points)} customers, "
             f"{int(demand_points['Demand'].sum())} packages simulated"
@@ -657,5 +787,9 @@ def simulate_city(
         {
             model_code: pd.DataFrame(detail_rows)
             for model_code, detail_rows in all_model_details.items()
+        },
+        {
+            audit_name: pd.DataFrame(audit_rows)
+            for audit_name, audit_rows in all_audit_details.items()
         },
     )
