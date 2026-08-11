@@ -11,4 +11,8 @@ class RoutingAlgorithmConfig:
     ils_max_destruction_percentage: float = 100.0
     ils_biased_cws_alpha_min: float = 0.05
     ils_biased_cws_alpha_max: float = 0.25
+    ils_restricted_relocate: bool = True
+    ils_relocate_candidate_fraction: float = 0.10
+    ils_relocate_neighbor_routes: int = 5
+    ils_relocate_max_insertions: int = 3
     ils_random_seed: int | None = 42

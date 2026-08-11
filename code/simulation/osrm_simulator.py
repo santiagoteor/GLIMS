@@ -109,6 +109,35 @@ def parse_arguments() -> argparse.Namespace:
         type=float,
         default=None,
     )
+    parser.add_argument(
+        "--ils-restricted-relocate",
+        dest="ils_restricted_relocate",
+        action="store_true",
+        default=None,
+    )
+    parser.add_argument(
+        "--no-ils-restricted-relocate",
+        dest="ils_restricted_relocate",
+        action="store_false",
+    )
+    parser.add_argument(
+        "--ils-relocate-candidate-fraction",
+        dest="ils_relocate_candidate_fraction",
+        type=float,
+        default=None,
+    )
+    parser.add_argument(
+        "--ils-relocate-neighbor-routes",
+        dest="ils_relocate_neighbor_routes",
+        type=int,
+        default=None,
+    )
+    parser.add_argument(
+        "--ils-relocate-max-insertions",
+        dest="ils_relocate_max_insertions",
+        type=int,
+        default=None,
+    )
     parser.add_argument("--ils-random-seed", type=int, default=None)
     parser.add_argument("--traffic-profile", default=None)
     parser.add_argument("--traffic-multiplier", type=float, default=None)
@@ -146,6 +175,10 @@ def main() -> None:
         ),
         ils_biased_cws_alpha_min=config.routing.ils_biased_cws_alpha_min,
         ils_biased_cws_alpha_max=config.routing.ils_biased_cws_alpha_max,
+        ils_restricted_relocate=config.routing.ils_restricted_relocate,
+        ils_relocate_candidate_fraction=config.routing.ils_relocate_candidate_fraction,
+        ils_relocate_neighbor_routes=config.routing.ils_relocate_neighbor_routes,
+        ils_relocate_max_insertions=config.routing.ils_relocate_max_insertions,
         ils_random_seed=config.routing.ils_random_seed,
     )
 

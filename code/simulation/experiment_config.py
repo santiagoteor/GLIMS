@@ -18,6 +18,10 @@ class RoutingExperimentConfig:
     ils_max_destruction_percentage: int = 100
     ils_biased_cws_alpha_min: float = 0.05
     ils_biased_cws_alpha_max: float = 0.25
+    ils_restricted_relocate: bool = True
+    ils_relocate_candidate_fraction: float = 0.10
+    ils_relocate_neighbor_routes: int = 5
+    ils_relocate_max_insertions: int = 3
     ils_random_seed: int | None = 42
 
 
@@ -149,6 +153,14 @@ def validate_experiment_config(config: ExperimentConfig) -> None:
         raise ValueError("ils_biased_cws_alpha_max must be strictly between 0 and 1.")
     if config.routing.ils_biased_cws_alpha_min > config.routing.ils_biased_cws_alpha_max:
         raise ValueError("ils_biased_cws_alpha_min cannot exceed ils_biased_cws_alpha_max.")
+    if not (0 < config.routing.ils_relocate_candidate_fraction <= 1):
+        raise ValueError(
+            "ils_relocate_candidate_fraction must be greater than 0 and at most 1."
+        )
+    if config.routing.ils_relocate_neighbor_routes <= 0:
+        raise ValueError("ils_relocate_neighbor_routes must be greater than zero.")
+    if config.routing.ils_relocate_max_insertions <= 0:
+        raise ValueError("ils_relocate_max_insertions must be greater than zero.")
     if config.facility_filter.initial_buffer_m < 0:
         raise ValueError(
             "facility_filter.initial_buffer_m cannot be negative."
@@ -231,6 +243,22 @@ def resolve_experiment_config(
         ils_biased_cws_alpha_max=_pick(
             overrides.get("ils_biased_cws_alpha_max"),
             base.routing.ils_biased_cws_alpha_max,
+        ),
+        ils_restricted_relocate=_pick(
+            overrides.get("ils_restricted_relocate"),
+            base.routing.ils_restricted_relocate,
+        ),
+        ils_relocate_candidate_fraction=_pick(
+            overrides.get("ils_relocate_candidate_fraction"),
+            base.routing.ils_relocate_candidate_fraction,
+        ),
+        ils_relocate_neighbor_routes=_pick(
+            overrides.get("ils_relocate_neighbor_routes"),
+            base.routing.ils_relocate_neighbor_routes,
+        ),
+        ils_relocate_max_insertions=_pick(
+            overrides.get("ils_relocate_max_insertions"),
+            base.routing.ils_relocate_max_insertions,
         ),
         ils_random_seed=_pick(
             overrides.get("ils_random_seed"),

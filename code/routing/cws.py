@@ -87,33 +87,60 @@ def _minimum_route_count_lower_bound(
     return max(capacity_bound, service_bound)
 
 
+
 def _biased_candidate_positions(
     candidate_count: int,
     *,
     alpha_min: float,
     alpha_max: float,
     rng: np.random.Generator,
+    candidate_window: int = 2048,
 ):
-    """Yield savings-list positions using Juan et al.'s quasi-geometric bias.
-
-    Rank 0 is the best remaining saving. A fresh alpha is drawn uniformly from
-    ``[alpha_min, alpha_max]`` at every edge-selection step. A geometric draw
-    selects the rank; if it falls outside the finite current list, a uniform
-    fallback is used. This is equivalent to distributing the geometric tail
-    probability uniformly across the finite list (the paper's epsilon term).
     """
+    Yield savings-list positions using a quasi-geometric biased RCL.
 
-    active = _FenwickOrderStatisticSet(candidate_count)
+    Savings are already sorted from best to worst. Instead of maintaining an
+    order-statistic tree over all O(n^2) savings, keep only a small ordered
+    Restricted Candidate List (RCL) containing the best remaining positions.
 
-    while active.remaining:
+    At each step:
+      * draw a fresh alpha in [alpha_min, alpha_max];
+      * draw a geometric rank;
+      * select that rank inside the ordered RCL;
+      * remove it and append the next unseen saving position.
+
+    The RCL remains ordered by the original savings ranking, so rank 0 is
+    always the best remaining candidate in the current window.
+
+    For alpha_min=0.05, probability mass is already overwhelmingly
+    concentrated in the first few hundred ranks, so a default window of 2048
+    is intentionally conservative while avoiding a 35-million-element
+    Fenwick structure.
+    """
+    if candidate_count <= 0:
+        return
+
+    window = max(1, min(int(candidate_window), int(candidate_count)))
+    active = list(range(window))
+    next_position = window
+
+    while active:
         alpha = float(rng.uniform(alpha_min, alpha_max))
         rank = int(rng.geometric(alpha)) - 1
 
-        if rank >= active.remaining:
-            rank = int(rng.integers(0, active.remaining))
+        if rank >= len(active):
+            # Same finite-list fallback used previously.
+            rank = int(rng.integers(0, len(active)))
 
-        yield active.pop_rank(rank)
+        selected_position = active.pop(rank)
 
+        if next_position < candidate_count:
+            # next_position is worse than every currently active saving, so
+            # appending preserves the RCL's savings order.
+            active.append(next_position)
+            next_position += 1
+
+        yield selected_position
 
 def clarke_wright_savings(
     matrix: np.ndarray,
@@ -129,6 +156,8 @@ def clarke_wright_savings(
     biased_randomization: bool = False,
     biased_alpha_min: float = 0.05,
     biased_alpha_max: float = 0.25,
+    biased_candidate_window: int = 2048,
+    max_failed_candidates_without_merge: int | None = 200_000,
     rng: np.random.Generator | None = None,
 ):
     """
@@ -156,6 +185,22 @@ def clarke_wright_savings(
             )
         if rng is None:
             rng = np.random.default_rng()
+
+        biased_candidate_window = int(biased_candidate_window)
+        if biased_candidate_window <= 0:
+            raise ValueError(
+                "biased_candidate_window must be greater than zero."
+            )
+
+        if max_failed_candidates_without_merge is not None:
+            max_failed_candidates_without_merge = int(
+                max_failed_candidates_without_merge
+            )
+            if max_failed_candidates_without_merge <= 0:
+                raise ValueError(
+                    "max_failed_candidates_without_merge must be greater "
+                    "than zero when provided."
+                )
 
     if n_clients <= 0:
         return 0.0, []
@@ -293,6 +338,7 @@ def clarke_wright_savings(
             alpha_min=biased_alpha_min,
             alpha_max=biased_alpha_max,
             rng=rng,
+            candidate_window=biased_candidate_window,
         )
     else:
         print("Starting CWS route merging...")
@@ -325,13 +371,35 @@ def clarke_wright_savings(
         miniters=max(1, n_pairs // 1000),
         leave=False,
     )
+    processed_candidates = 0
+    successful_merges = 0
+    failed_since_last_merge = 0
+    termination_reason = "candidate_exhaustion"
+
+    def register_failed_candidate() -> bool:
+        nonlocal failed_since_last_merge, termination_reason
+        failed_since_last_merge += 1
+        if (
+            biased_randomization
+            and max_failed_candidates_without_merge is not None
+            and failed_since_last_merge
+            >= max_failed_candidates_without_merge
+        ):
+            termination_reason = "stagnation"
+            return True
+        return False
+
     for candidate_position in merge_progress:
+        processed_candidates += 1
+
         i = int(sorted_i[candidate_position])
         j = int(sorted_j[candidate_position])
         route_i_id = route_of[i]
         route_j_id = route_of[j]
 
         if route_i_id == route_j_id:
+            if register_failed_candidate():
+                break
             continue
 
         route_i = routes[route_i_id]
@@ -343,6 +411,8 @@ def clarke_wright_savings(
             elif route_i[0] == i:
                 oriented_i = list(reversed(route_i))
             else:
+                if register_failed_candidate():
+                    break
                 continue
 
             if route_j[0] == j:
@@ -350,9 +420,13 @@ def clarke_wright_savings(
             elif route_j[-1] == j:
                 oriented_j = list(reversed(route_j))
             else:
+                if register_failed_candidate():
+                    break
                 continue
         else:
             if route_i[-1] != i or route_j[0] != j:
+                if register_failed_candidate():
+                    break
                 continue
             oriented_i = route_i
             oriented_j = route_j
@@ -360,6 +434,8 @@ def clarke_wright_savings(
         merged_load = route_loads[route_i_id] + route_loads[route_j_id]
 
         if merged_load > vehicle_capacity:
+            if register_failed_candidate():
+                break
             continue
 
         merged_route = oriented_i + oriented_j
@@ -372,6 +448,8 @@ def clarke_wright_savings(
             )[0]
 
             if merged_duration > max_route_duration_min:
+                if register_failed_candidate():
+                    break
                 continue
 
         routes[route_i_id] = merged_route
@@ -383,10 +461,13 @@ def clarke_wright_savings(
         for client in merged_route:
             route_of[client] = route_i_id
 
+        successful_merges += 1
+        failed_since_last_merge = 0
+
         # No further capacity-/service-feasible solution can contain fewer
-        # routes than this lower bound. Once reached, additional candidate
-        # processing cannot reduce the route count further.
+        # routes than this lower bound.
         if len(routes) <= lower_bound_routes:
+            termination_reason = "lower_bound_reached"
             break
 
     final_routes = list(routes.values())
@@ -397,6 +478,9 @@ def clarke_wright_savings(
     print(
         f"{'BR-CWS' if biased_randomization else 'CWS'} route merging completed in "
         f"{merging_seconds:.2f} seconds. "
-        f"Final routes: {len(final_routes)}."
+        f"Final routes: {len(final_routes)} | "
+        f"processed savings: {processed_candidates:,} | "
+        f"successful merges: {successful_merges:,} | "
+        f"termination: {termination_reason}."
     )
     return total_cost, final_routes
