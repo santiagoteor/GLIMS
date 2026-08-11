@@ -1,22 +1,27 @@
 {
-  "experiment_name": "barcelona_eixample_ils_cws_standard",
+  "experiment_name": "barcelona_eixample_ils_baseline",
   "city": "barcelona",
   "zones": [
     "l'Eixample"
   ],
-  "demand_scenario": "high",
+  "demand_scenario": "low",
   "instance_size": 1000,
   "osrm_profile": "driving",
   "routing": {
     "algorithm": "ils",
+    "cws_allow_route_reversal": false,
     "ils_max_iterations": 100,
     "ils_max_no_improvement": 20,
     "ils_destruction_percentage_step": 10,
     "ils_max_destruction_percentage": 100,
     "ils_biased_cws_alpha_min": 0.05,
     "ils_biased_cws_alpha_max": 0.25,
+    "ils_restricted_relocate": true,
+    "ils_relocate_candidate_fraction": 0.10,
+    "ils_relocate_neighbor_routes": 5,
+    "ils_relocate_max_insertions": 3,
     "ils_random_seed": 42
-},
+  },
   "traffic": {
     "static_profile": "baseline",
     "static_multiplier_override": null,
@@ -29,6 +34,7 @@
     "save_route_details": true,
     "save_configuration": true,
     "save_metadata": true,
+    "save_route_geometry": true,
     "show_progress": true
   },
   "facility_filter": {

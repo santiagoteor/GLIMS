@@ -170,6 +170,10 @@ def calculate_microhub_last_mile(
             ils_max_destruction_percentage=routing_config.ils_max_destruction_percentage,
             ils_biased_cws_alpha_min=routing_config.ils_biased_cws_alpha_min,
             ils_biased_cws_alpha_max=routing_config.ils_biased_cws_alpha_max,
+            ils_restricted_relocate=routing_config.ils_restricted_relocate,
+            ils_relocate_candidate_fraction=routing_config.ils_relocate_candidate_fraction,
+            ils_relocate_neighbor_routes=routing_config.ils_relocate_neighbor_routes,
+            ils_relocate_max_insertions=routing_config.ils_relocate_max_insertions,
             ils_random_seed=routing_config.ils_random_seed,
             show_progress=show_progress,
         )
@@ -316,6 +320,10 @@ def calculate_pudo_last_mile(
             ils_max_destruction_percentage=routing_config.ils_max_destruction_percentage,
             ils_biased_cws_alpha_min=routing_config.ils_biased_cws_alpha_min,
             ils_biased_cws_alpha_max=routing_config.ils_biased_cws_alpha_max,
+            ils_restricted_relocate=routing_config.ils_restricted_relocate,
+            ils_relocate_candidate_fraction=routing_config.ils_relocate_candidate_fraction,
+            ils_relocate_neighbor_routes=routing_config.ils_relocate_neighbor_routes,
+            ils_relocate_max_insertions=routing_config.ils_relocate_max_insertions,
             ils_random_seed=routing_config.ils_random_seed,
             show_progress=show_progress,
         )

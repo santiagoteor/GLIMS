@@ -112,10 +112,279 @@ def improve_routes_two_opt(
     total_cost = calculate_routes_matrix_cost(matrix, improved_routes)
     return total_cost, improved_routes
 
+
+def _route_removal_gain(
+    route: list[int],
+    position: int,
+    matrix: np.ndarray,
+) -> float:
+    """Distance saved by removing ``route[position]`` from a directed route."""
+    client = route[position]
+    previous = 0 if position == 0 else route[position - 1]
+    following = 0 if position == len(route) - 1 else route[position + 1]
+    return float(
+        matrix[previous, client]
+        + matrix[client, following]
+        - matrix[previous, following]
+    )
+
+
+def _route_insertion_delta(
+    route: list[int],
+    position: int,
+    client: int,
+    matrix: np.ndarray,
+) -> float:
+    """Extra directed distance caused by inserting a client at ``position``."""
+    previous = 0 if position == 0 else route[position - 1]
+    following = 0 if position == len(route) else route[position]
+    return float(
+        matrix[previous, client]
+        + matrix[client, following]
+        - matrix[previous, following]
+    )
+
+
+def _route_proximity_score(
+    client: int,
+    route: list[int],
+    matrix: np.ndarray,
+) -> float:
+    """
+    Directed proximity score used only to shortlist destination routes.
+
+    Both directions are considered because OSRM matrices can be asymmetric.
+    """
+    if not route:
+        return float("inf")
+    return min(
+        float(matrix[client, other] + matrix[other, client])
+        for other in route
+    )
+
+
+def improve_routes_restricted_relocate(
+    routes: list[list[int]],
+    matrix: np.ndarray,
+    vehicle_capacity: float,
+    client_demands: np.ndarray,
+    *,
+    candidate_fraction: float = 0.10,
+    neighbor_routes: int = 5,
+    max_insertions_per_route: int = 3,
+    duration_matrix: np.ndarray | None = None,
+    max_route_duration_min: float | None = None,
+    route_start_time_per_route_min: float = 0.0,
+) -> tuple[float, list[list[int]], dict[str, float | int]]:
+    """
+    Bounded inter-route relocate.
+
+    Only high-marginal-cost clients are considered, only a small set of nearby
+    routes is inspected, and only the best few insertion positions are tested.
+    Improving moves are accepted immediately.
+    """
+    started_at = perf_counter()
+
+    if len(routes) < 2:
+        return (
+            float(calculate_routes_matrix_cost(matrix, routes)),
+            [route.copy() for route in routes],
+            {
+                "runtime_seconds": perf_counter() - started_at,
+                "candidate_clients": 0,
+                "moves_evaluated": 0,
+                "moves_accepted": 0,
+                "improvement_km": 0.0,
+            },
+        )
+
+    candidate_fraction = float(candidate_fraction)
+    if not 0.0 < candidate_fraction <= 1.0:
+        raise ValueError(
+            "candidate_fraction must be greater than 0 and at most 1."
+        )
+    if neighbor_routes <= 0:
+        raise ValueError("neighbor_routes must be greater than zero.")
+    if max_insertions_per_route <= 0:
+        raise ValueError(
+            "max_insertions_per_route must be greater than zero."
+        )
+
+    working_routes = [route.copy() for route in routes]
+    demands = np.asarray(client_demands, dtype=float)
+    route_loads = [
+        float(sum(demands[client - 1] for client in route))
+        for route in working_routes
+    ]
+    initial_cost = float(
+        calculate_routes_matrix_cost(matrix, working_routes)
+    )
+
+    ranked_candidates: list[tuple[float, int]] = []
+    for route in working_routes:
+        for position, client in enumerate(route):
+            ranked_candidates.append(
+                (_route_removal_gain(route, position, matrix), client)
+            )
+
+    ranked_candidates.sort(key=lambda item: item[0], reverse=True)
+    candidate_count = max(
+        1,
+        int(np.ceil(candidate_fraction * len(ranked_candidates))),
+    )
+    candidate_clients = [
+        client for _gain, client in ranked_candidates[:candidate_count]
+    ]
+
+    client_to_route: dict[int, int] = {}
+    for route_index, route in enumerate(working_routes):
+        for client in route:
+            client_to_route[client] = route_index
+
+    moves_evaluated = 0
+    moves_accepted = 0
+
+    for client in candidate_clients:
+        source_index = client_to_route.get(client)
+        if source_index is None:
+            continue
+
+        source_route = working_routes[source_index]
+        if not source_route:
+            continue
+
+        try:
+            source_position = source_route.index(client)
+        except ValueError:
+            continue
+
+        removal_gain = _route_removal_gain(
+            source_route,
+            source_position,
+            matrix,
+        )
+        demand = float(demands[client - 1])
+
+        destinations: list[tuple[float, int]] = []
+        for destination_index, destination_route in enumerate(working_routes):
+            if destination_index == source_index or not destination_route:
+                continue
+            if route_loads[destination_index] + demand > vehicle_capacity + 1e-9:
+                continue
+            destinations.append(
+                (
+                    _route_proximity_score(
+                        client,
+                        destination_route,
+                        matrix,
+                    ),
+                    destination_index,
+                )
+            )
+
+        destinations.sort(key=lambda item: item[0])
+        destinations = destinations[:neighbor_routes]
+
+        accepted = False
+
+        for _proximity, destination_index in destinations:
+            destination_route = working_routes[destination_index]
+
+            insertion_options = [
+                (
+                    _route_insertion_delta(
+                        destination_route,
+                        position,
+                        client,
+                        matrix,
+                    ),
+                    position,
+                )
+                for position in range(len(destination_route) + 1)
+            ]
+            insertion_options.sort(key=lambda item: item[0])
+
+            for insertion_delta, insertion_position in insertion_options[
+                :max_insertions_per_route
+            ]:
+                moves_evaluated += 1
+
+                total_delta = insertion_delta - removal_gain
+                if total_delta >= -1e-9:
+                    continue
+
+                candidate_source = (
+                    source_route[:source_position]
+                    + source_route[source_position + 1:]
+                )
+                candidate_destination = (
+                    destination_route[:insertion_position]
+                    + [client]
+                    + destination_route[insertion_position:]
+                )
+
+                # An accepted relocate may remove the last client from its
+                # source route. An empty source route is valid: that vehicle
+                # route simply disappears. Do not send an empty route to the
+                # duration evaluator, whose result list has no element [0].
+                if candidate_source and not _is_route_duration_feasible(
+                    candidate_source,
+                    duration_matrix,
+                    max_route_duration_min,
+                    route_start_time_per_route_min,
+                ):
+                    continue
+
+                if not _is_route_duration_feasible(
+                    candidate_destination,
+                    duration_matrix,
+                    max_route_duration_min,
+                    route_start_time_per_route_min,
+                ):
+                    continue
+
+                working_routes[source_index] = candidate_source
+                working_routes[destination_index] = candidate_destination
+                route_loads[source_index] -= demand
+                route_loads[destination_index] += demand
+                client_to_route[client] = destination_index
+
+                moves_accepted += 1
+                accepted = True
+                break
+
+            if accepted:
+                break
+
+    working_routes = [route for route in working_routes if route]
+    final_cost = float(
+        calculate_routes_matrix_cost(matrix, working_routes)
+    )
+
+    return (
+        final_cost,
+        working_routes,
+        {
+            "runtime_seconds": perf_counter() - started_at,
+            "candidate_clients": candidate_count,
+            "moves_evaluated": moves_evaluated,
+            "moves_accepted": moves_accepted,
+            "improvement_km": max(0.0, initial_cost - final_cost),
+        },
+    )
+
+
+
 def _local_search(
     routes: list[list[int]],
     matrix: np.ndarray,
     *,
+    vehicle_capacity: float | None = None,
+    client_demands: np.ndarray | None = None,
+    restricted_relocate: bool = False,
+    relocate_candidate_fraction: float = 0.10,
+    relocate_neighbor_routes: int = 5,
+    relocate_max_insertions: int = 3,
     duration_matrix: np.ndarray | None = None,
     max_route_duration_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
@@ -139,6 +408,45 @@ def _local_search(
         f"Local search stage completed in "
         f"{perf_counter() - stage_start:.2f} seconds."
     )
+
+    if restricted_relocate:
+        if vehicle_capacity is None or client_demands is None:
+            raise ValueError(
+                "vehicle_capacity and client_demands are required when "
+                "restricted relocate is enabled."
+            )
+
+        print(
+            "Local search: restricted inter-route relocate "
+            f"(top {100.0 * relocate_candidate_fraction:.1f}% clients, "
+            f"{relocate_neighbor_routes} neighbor routes, "
+            f"{relocate_max_insertions} insertion positions)..."
+        )
+        relocate_start = perf_counter()
+
+        final_cost, final_routes, relocate_stats = (
+            improve_routes_restricted_relocate(
+                final_routes,
+                matrix,
+                vehicle_capacity,
+                client_demands,
+                candidate_fraction=relocate_candidate_fraction,
+                neighbor_routes=relocate_neighbor_routes,
+                max_insertions_per_route=relocate_max_insertions,
+                duration_matrix=duration_matrix,
+                max_route_duration_min=max_route_duration_min,
+                route_start_time_per_route_min=route_start_time_per_route_min,
+            )
+        )
+
+        print(
+            "Restricted relocate completed in "
+            f"{perf_counter() - relocate_start:.2f} seconds | "
+            f"candidates={relocate_stats['candidate_clients']} | "
+            f"evaluated={relocate_stats['moves_evaluated']} | "
+            f"accepted={relocate_stats['moves_accepted']} | "
+            f"improvement={relocate_stats['improvement_km']:.3f} km"
+        )
 
     print(
         f"Local search completed in "
@@ -317,6 +625,10 @@ def iterated_local_search(
     max_destruction_percentage: float = 100.0,
     biased_cws_alpha_min: float = 0.05,
     biased_cws_alpha_max: float = 0.25,
+    restricted_relocate: bool = True,
+    relocate_candidate_fraction: float = 0.10,
+    relocate_neighbor_routes: int = 5,
+    relocate_max_insertions: int = 3,
     random_seed: int | None = None,
     show_progress: bool = False,
     cws_allow_route_reversal: bool = False,
@@ -371,6 +683,18 @@ def iterated_local_search(
             "biased_cws_alpha_min cannot exceed biased_cws_alpha_max."
         )
 
+    relocate_candidate_fraction = float(relocate_candidate_fraction)
+    if not 0.0 < relocate_candidate_fraction <= 1.0:
+        raise ValueError(
+            "relocate_candidate_fraction must be greater than 0 and at most 1."
+        )
+    if relocate_neighbor_routes <= 0:
+        raise ValueError("relocate_neighbor_routes must be greater than zero.")
+    if relocate_max_insertions <= 0:
+        raise ValueError(
+            "relocate_max_insertions must be greater than zero."
+        )
+
     demands = (
         np.ones(n_clients, dtype=float)
         if client_demands is None
@@ -402,6 +726,12 @@ def iterated_local_search(
     current_cost, current_routes = _local_search(
         initial_routes,
         matrix,
+        vehicle_capacity=vehicle_capacity,
+        client_demands=demands,
+        restricted_relocate=restricted_relocate,
+        relocate_candidate_fraction=relocate_candidate_fraction,
+        relocate_neighbor_routes=relocate_neighbor_routes,
+        relocate_max_insertions=relocate_max_insertions,
         duration_matrix=duration_matrix,
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
@@ -447,6 +777,12 @@ def iterated_local_search(
         candidate_cost, candidate_routes = _local_search(
             perturbed_routes,
             matrix,
+            vehicle_capacity=vehicle_capacity,
+            client_demands=demands,
+            restricted_relocate=restricted_relocate,
+            relocate_candidate_fraction=relocate_candidate_fraction,
+            relocate_neighbor_routes=relocate_neighbor_routes,
+            relocate_max_insertions=relocate_max_insertions,
             duration_matrix=duration_matrix,
             max_route_duration_min=max_route_duration_min,
             route_start_time_per_route_min=route_start_time_per_route_min,
