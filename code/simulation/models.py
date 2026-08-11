@@ -233,7 +233,7 @@ def simulate_m3(
 ):
     """Simulate warehouse supply plus multi-microhub cargo-bike delivery."""
 
-    van = parameters["FURGONETA_CONV"]
+    van = parameters["FURGONETA_ELEC"]
     bike = parameters["BICICLETA_CARGO"]
 
     supply_distance_cost, supply_labor_cost, _ = (
@@ -243,10 +243,10 @@ def simulate_m3(
             route_count=supply_plan.route_count,
             route_start_time_per_route_min=supply_plan.route_start_time_per_route_min,
             cost_per_km=get_cost_parameter(
-                cost_parameters, "conventional_van_cost_per_km"
+                cost_parameters, "electric_van_cost_per_km"
             ),
             labor_cost_per_hour=get_cost_parameter(
-                cost_parameters, "conventional_van_labor_cost_per_hour"
+                cost_parameters, "electric_van_labor_cost_per_hour"
             ),
         )
     )
@@ -265,7 +265,7 @@ def simulate_m3(
         )
     )
 
-    supply_co2 = (supply_plan.total_distance_km * van["co2_km"]) / 1000
+    supply_co2 = 0.0  # Electric van: zero direct/tailpipe CO2 emissions.
     route_distance_cost = supply_distance_cost + bike_distance_cost
     route_labor_cost = supply_labor_cost + bike_labor_cost
 
@@ -292,7 +292,7 @@ def simulate_m3(
         vehicle_fixed_cost_per_route=(
             supply_plan.route_count
             * get_cost_parameter(
-                cost_parameters, "conventional_van_fixed_cost_per_route"
+                cost_parameters, "electric_van_fixed_cost_per_route"
             )
             + bike_route_count
             * get_cost_parameter(
@@ -305,7 +305,7 @@ def simulate_m3(
         vehicle_capex_allocation_per_route=(
             supply_plan.route_count
             * get_cost_parameter(
-                cost_parameters, "conventional_van_capex_allocation_per_route"
+                cost_parameters, "electric_van_capex_allocation_per_route"
             )
             + bike_route_count
             * get_cost_parameter(
@@ -353,7 +353,7 @@ def simulate_m4(
 ):
     """Simulate multi-PUDO supply plus courier delivery on foot."""
 
-    van = parameters["FURGONETA_CONV"]
+    van = parameters["FURGONETA_ELEC"]
     walking = parameters["PUDO_A_PIE"]
 
     supply_distance_cost, supply_labor_cost, _ = (
@@ -363,10 +363,10 @@ def simulate_m4(
             route_count=supply_plan.route_count,
             route_start_time_per_route_min=supply_plan.route_start_time_per_route_min,
             cost_per_km=get_cost_parameter(
-                cost_parameters, "conventional_van_cost_per_km"
+                cost_parameters, "electric_van_cost_per_km"
             ),
             labor_cost_per_hour=get_cost_parameter(
-                cost_parameters, "conventional_van_labor_cost_per_hour"
+                cost_parameters, "electric_van_labor_cost_per_hour"
             ),
         )
     )
@@ -385,7 +385,7 @@ def simulate_m4(
         )
     )
 
-    supply_co2 = (supply_plan.total_distance_km * van["co2_km"]) / 1000
+    supply_co2 = 0.0  # Electric van: zero direct/tailpipe CO2 emissions.
     route_distance_cost = supply_distance_cost + walking_distance_cost
     route_labor_cost = supply_labor_cost + walking_labor_cost
     pudo_commission = get_cost_parameter(
@@ -396,7 +396,7 @@ def simulate_m4(
     weighted_vehicle_fixed = (
         supply_plan.route_count
         * get_cost_parameter(
-            cost_parameters, "conventional_van_fixed_cost_per_route"
+            cost_parameters, "electric_van_fixed_cost_per_route"
         )
         + walking_route_count
         * get_cost_parameter(
@@ -406,7 +406,7 @@ def simulate_m4(
     weighted_vehicle_capex = (
         supply_plan.route_count
         * get_cost_parameter(
-            cost_parameters, "conventional_van_capex_allocation_per_route"
+            cost_parameters, "electric_van_capex_allocation_per_route"
         )
         + walking_route_count
         * get_cost_parameter(
@@ -476,7 +476,7 @@ def simulate_m5(
 ):
     """Simulate multi-PUDO supply plus customer collection travel."""
 
-    van = parameters["FURGONETA_CONV"]
+    van = parameters["FURGONETA_ELEC"]
     model = parameters["PUDO_CONSUMIDOR"]
 
     distance_cost, labor_cost, _ = calculate_direct_route_operating_cost(
@@ -485,13 +485,13 @@ def simulate_m5(
         route_count=supply_plan.route_count,
         route_start_time_per_route_min=supply_plan.route_start_time_per_route_min,
         cost_per_km=get_cost_parameter(
-            cost_parameters, "conventional_van_cost_per_km"
+            cost_parameters, "electric_van_cost_per_km"
         ),
         labor_cost_per_hour=get_cost_parameter(
-            cost_parameters, "conventional_van_labor_cost_per_hour"
+            cost_parameters, "electric_van_labor_cost_per_hour"
         ),
     )
-    supply_co2 = (supply_plan.total_distance_km * van["co2_km"]) / 1000
+    supply_co2 = 0.0  # Electric van: zero direct/tailpipe CO2 emissions.
     customer_co2 = (
         customer_travel_km * float(model.get("co2_km_estimado_cliente", 0.0) or 0.0)
     ) / 1000
@@ -517,13 +517,13 @@ def simulate_m5(
             cost_parameters, "warehouse_handling_cost_per_package"
         ),
         vehicle_fixed_cost_per_route=get_cost_parameter(
-            cost_parameters, "conventional_van_fixed_cost_per_route"
+            cost_parameters, "electric_van_fixed_cost_per_route"
         ),
         facility_capex_allocation_per_day=get_cost_parameter(
             cost_parameters, "pudo_capex_allocation_per_day"
         ),
         vehicle_capex_allocation_per_route=get_cost_parameter(
-            cost_parameters, "conventional_van_capex_allocation_per_route"
+            cost_parameters, "electric_van_capex_allocation_per_route"
         ),
         customer_time_cost_per_hour=get_cost_parameter(
             cost_parameters, "customer_time_cost_per_hour"

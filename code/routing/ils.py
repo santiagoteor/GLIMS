@@ -206,6 +206,9 @@ def reconstruct_routes(
     max_route_duration_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
     cws_allow_route_reversal: bool = False,
+    biased_cws_alpha_min: float = 0.05,
+    biased_cws_alpha_max: float = 0.25,
+    rng: np.random.Generator | None = None,
     show_progress: bool = False,
 ) -> list[list[int]]:
 
@@ -227,6 +230,14 @@ def reconstruct_routes(
         dtype=float,
     )
 
+    if rng is None:
+        rng = np.random.default_rng()
+
+    print(
+        f"BR-CWS reconstruction: {n_freed} clients | "
+        f"alpha~U({biased_cws_alpha_min:.3f}, {biased_cws_alpha_max:.3f})"
+    )
+
     _, sub_routes = clarke_wright_savings(
         matrix=sub_matrix,
         n_clients=n_freed,
@@ -237,6 +248,15 @@ def reconstruct_routes(
         route_start_time_per_route_min=route_start_time_per_route_min,
         show_progress=show_progress,
         allow_route_reversal=cws_allow_route_reversal,
+        biased_randomization=True,
+        biased_alpha_min=biased_cws_alpha_min,
+        biased_alpha_max=biased_cws_alpha_max,
+        rng=rng,
+    )
+
+    print(
+        f"BR-CWS reconstruction completed: "
+        f"{len(sub_routes)} routes created."
     )
 
     return [
@@ -257,6 +277,8 @@ def destruction_reconstruction(
     max_route_duration_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
     cws_allow_route_reversal: bool = False,
+    biased_cws_alpha_min: float = 0.05,
+    biased_cws_alpha_max: float = 0.25,
 ) -> list[list[int]]:
 
     remaining_routes, freed_clients = destroy_routes(
@@ -272,6 +294,9 @@ def destruction_reconstruction(
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
         cws_allow_route_reversal=cws_allow_route_reversal,
+        biased_cws_alpha_min=biased_cws_alpha_min,
+        biased_cws_alpha_max=biased_cws_alpha_max,
+        rng=rng,
     )
 
     return remaining_routes + new_routes
@@ -290,6 +315,8 @@ def iterated_local_search(
     max_iterations_without_improvement: int | None = 20,
     destruction_percentage_step: float = 10.0,
     max_destruction_percentage: float = 100.0,
+    biased_cws_alpha_min: float = 0.05,
+    biased_cws_alpha_max: float = 0.25,
     random_seed: int | None = None,
     show_progress: bool = False,
     cws_allow_route_reversal: bool = False,
@@ -300,8 +327,11 @@ def iterated_local_search(
 
     Clarke-Wright Savings generates the initial solution. Local search then
     improves it with 2-opt. Perturbation is a destroy-and-rebuild step: a
-    growing percentage of routes is removed at random and rebuilt with
-    Clarke-Wright Savings on the freed clients.
+    growing percentage of routes is removed at random and rebuilt with a
+    biased-randomized Clarke-Wright Savings procedure on the freed clients.
+    During reconstruction, every BR-CWS edge-selection step samples its
+    geometric-distribution alpha uniformly from
+    ``[biased_cws_alpha_min, biased_cws_alpha_max]``.
 
     A candidate solution is only accepted when it strictly improves the
     current base solution. When it does not, the base solution is kept
@@ -324,6 +354,21 @@ def iterated_local_search(
     if destruction_percentage_step <= 0:
         raise ValueError(
             "destruction_percentage_step must be greater than zero."
+        )
+
+    biased_cws_alpha_min = float(biased_cws_alpha_min)
+    biased_cws_alpha_max = float(biased_cws_alpha_max)
+    if not 0.0 < biased_cws_alpha_min < 1.0:
+        raise ValueError(
+            "biased_cws_alpha_min must be strictly between 0 and 1."
+        )
+    if not 0.0 < biased_cws_alpha_max < 1.0:
+        raise ValueError(
+            "biased_cws_alpha_max must be strictly between 0 and 1."
+        )
+    if biased_cws_alpha_min > biased_cws_alpha_max:
+        raise ValueError(
+            "biased_cws_alpha_min cannot exceed biased_cws_alpha_max."
         )
 
     demands = (
@@ -395,6 +440,8 @@ def iterated_local_search(
             max_route_duration_min=max_route_duration_min,
             route_start_time_per_route_min=route_start_time_per_route_min,
             cws_allow_route_reversal=cws_allow_route_reversal,
+            biased_cws_alpha_min=biased_cws_alpha_min,
+            biased_cws_alpha_max=biased_cws_alpha_max,
         )
 
         candidate_cost, candidate_routes = _local_search(

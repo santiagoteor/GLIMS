@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from time import perf_counter
 
 import numpy as np
@@ -94,7 +94,9 @@ class CapacityAwareOsrmRouter:
         ils_max_iterations: int = 100,
         ils_max_iterations_without_improvement: int | None = 20,
         ils_destruction_percentage_step: float = 10.0,
-        ils_max_destruction_percentage: float = 100.0,        
+        ils_max_destruction_percentage: float = 100.0,
+        ils_biased_cws_alpha_min: float = 0.05,
+        ils_biased_cws_alpha_max: float = 0.25,
         ils_random_seed: int | None = 42,
         traffic_profile: TrafficProfile | None = None,
         time_traffic_provider: TimeTrafficProvider | None = None,
@@ -283,7 +285,10 @@ class CapacityAwareOsrmRouter:
                     ils_max_iterations_without_improvement
                 ),
                 destruction_percentage_step=ils_destruction_percentage_step,
-                max_destruction_percentage=ils_max_destruction_percentage,                random_seed=ils_random_seed,
+                max_destruction_percentage=ils_max_destruction_percentage,
+                biased_cws_alpha_min=ils_biased_cws_alpha_min,
+                biased_cws_alpha_max=ils_biased_cws_alpha_max,
+                random_seed=ils_random_seed,
                 show_progress=show_progress,
                 cws_allow_route_reversal=cws_allow_route_reversal,
                 return_stats=True,
@@ -494,7 +499,7 @@ def calculate_facility_supply_route(
     shift_start: datetime | None = None,
     shift_end: datetime | None = None,
     show_progress: bool = False,
-) -> tuple[OsrmRoutePlan, pd.DataFrame]:
+) -> tuple[OsrmRoutePlan, pd.DataFrame, dict[str, datetime]]:
     """Route logistics-center supply to every used facility.
 
     Facility demand is split into visits no larger than truck capacity.
@@ -522,7 +527,7 @@ def calculate_facility_supply_route(
             traffic_profile=traffic_profile.name,
             traffic_duration_multiplier=traffic_profile.duration_multiplier,
             traffic_source=traffic_profile.source,
-        ), pd.DataFrame()
+        ), pd.DataFrame(), {}
 
     supply_visits = expand_facility_supply_visits(
         used_facilities,
@@ -551,7 +556,9 @@ def calculate_facility_supply_route(
             routing_config.ils_max_iterations_without_improvement
         ),
         ils_destruction_percentage_step=routing_config.ils_destruction_percentage_step,
-        ils_max_destruction_percentage=routing_config.ils_max_destruction_percentage,        
+        ils_max_destruction_percentage=routing_config.ils_max_destruction_percentage,
+        ils_biased_cws_alpha_min=routing_config.ils_biased_cws_alpha_min,
+        ils_biased_cws_alpha_max=routing_config.ils_biased_cws_alpha_max,
         ils_random_seed=routing_config.ils_random_seed,
         traffic_profile=traffic_profile,
         time_traffic_provider=time_traffic_provider,
@@ -567,7 +574,56 @@ def calculate_facility_supply_route(
         f"{plan.total_duration_min:.2f} total min"
     )
 
-    return plan, supply_visits
+    # Determine when every facility has received all of its supply visits.
+    # This is used to start downstream last-mile operations only after the
+    # required parcels are physically available at the facility.
+    facility_available_at: dict[str, datetime] = {}
+
+    if (
+        time_traffic_provider is not None
+        and shift_start is not None
+        and shift_end is not None
+        and plan.routes
+    ):
+        # Reuse the matrix already cached by this router; this does not issue
+        # another OSRM request for the same coordinates.
+        _, base_duration_matrix = router.get_matrices(
+            depot_latitude=float(selected_cc["Latitude"]),
+            depot_longitude=float(selected_cc["Longitude"]),
+            clients=supply_visits[["Latitude", "Longitude"]],
+            transport_mode="driving",
+        )
+
+        for route in plan.routes:
+            timeline = evaluate_route_timeline(
+                route=route,
+                duration_matrix=base_duration_matrix,
+                route_start=shift_start,
+                shift_end=shift_end,
+                traffic_provider=time_traffic_provider,
+                traffic_zone=traffic_zone,
+                service_time_per_stop_min=SERVICE_TIME_PER_STOP_MIN,
+                route_preparation_time_min=TRUCK_LOADING_TIME_PER_ROUTE_MIN,
+            )
+
+            for segment in timeline.segments:
+                if segment.destination_index == 0:
+                    continue
+
+                visit = supply_visits.iloc[segment.destination_index - 1]
+                facility_name = str(visit["Location"])
+
+                # Parcels are considered available once the stop service /
+                # unloading operation has completed.
+                available_at = segment.arrival_datetime + timedelta(
+                    minutes=float(SERVICE_TIME_PER_STOP_MIN)
+                )
+
+                previous = facility_available_at.get(facility_name)
+                if previous is None or available_at > previous:
+                    facility_available_at[facility_name] = available_at
+
+    return plan, supply_visits, facility_available_at
 
 def expand_facility_supply_visits(
     facilities: pd.DataFrame,

@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 
@@ -106,6 +107,8 @@ def calculate_microhub_last_mile(
     bike_capacity: float,
     neighborhood_name: str,
     routing_config: RoutingAlgorithmConfig,
+    facility_available_at: dict[str, datetime] | None = None,
+    shift_end: datetime | None = None,
     add_geometry: bool = False,
     show_progress: bool = False,
 ) -> tuple[float, float, int, float, list[dict]]:
@@ -165,6 +168,8 @@ def calculate_microhub_last_mile(
             ),
             ils_destruction_percentage_step=routing_config.ils_destruction_percentage_step,
             ils_max_destruction_percentage=routing_config.ils_max_destruction_percentage,
+            ils_biased_cws_alpha_min=routing_config.ils_biased_cws_alpha_min,
+            ils_biased_cws_alpha_max=routing_config.ils_biased_cws_alpha_max,
             ils_random_seed=routing_config.ils_random_seed,
             show_progress=show_progress,
         )
@@ -176,21 +181,62 @@ def calculate_microhub_last_mile(
             max_route_duration,
             plan.max_route_duration_min,
         )
-        detail_rows.extend(
-            build_route_detail_rows(
-                city=city,
-                neighborhood_name=neighborhood_name,
-                model_code="M3",
-                leg="cycling_last_mile",
-                vehicle_type="cargo_bike",
-                depot_name=microhub_name,
-                plan=plan,
-                clients=customers,
-                depot_latitude=float(customers["facility_latitude"].iloc[0]),
-                depot_longitude=float(customers["facility_longitude"].iloc[0]),
-                add_geometry=add_geometry,
-            )
+        microhub_rows = build_route_detail_rows(
+            city=city,
+            neighborhood_name=neighborhood_name,
+            model_code="M3",
+            leg="cycling_last_mile",
+            vehicle_type="cargo_bike",
+            depot_name=microhub_name,
+            plan=plan,
+            clients=customers,
+            depot_latitude=float(customers["facility_latitude"].iloc[0]),
+            depot_longitude=float(customers["facility_longitude"].iloc[0]),
+            add_geometry=add_geometry,
         )
+
+        # Cycling is not currently traffic-adjusted, but it is now
+        # schedule-aware. Every cargo-bike route can start only when all
+        # supply visits required by its microhub have been completed.
+        available_at = (
+            facility_available_at.get(str(microhub_name))
+            if facility_available_at is not None
+            else None
+        )
+
+        if available_at is not None:
+            for row in microhub_rows:
+                route_duration = float(row["duration_min"])
+                route_end = available_at + timedelta(minutes=route_duration)
+
+                preparation = float(row.get("start_handling_min", 0.0))
+                service = float(row.get("stop_service_min", 0.0))
+                base_travel = max(
+                    0.0,
+                    route_duration - preparation - service,
+                )
+
+                row["route_start_datetime"] = available_at.isoformat(
+                    timespec="minutes"
+                )
+                row["route_end_datetime"] = route_end.isoformat(
+                    timespec="minutes"
+                )
+                row["base_travel_time_min"] = base_travel
+                row["time_dependent_travel_time_min"] = base_travel
+                row["traffic_delay_min"] = 0.0
+                row["time_traffic_profile"] = "not_applied"
+                row["simulation_date"] = available_at.date().isoformat()
+                row["shift_start_time"] = available_at.time().isoformat(
+                    timespec="minutes"
+                )
+                if shift_end is not None:
+                    row["shift_end_time"] = shift_end.time().isoformat(
+                        timespec="minutes"
+                    )
+                    row["shift_feasible"] = route_end <= shift_end
+
+        detail_rows.extend(microhub_rows)
 
     return (
         total_distance,
@@ -268,6 +314,8 @@ def calculate_pudo_last_mile(
             ),
             ils_destruction_percentage_step=routing_config.ils_destruction_percentage_step,
             ils_max_destruction_percentage=routing_config.ils_max_destruction_percentage,
+            ils_biased_cws_alpha_min=routing_config.ils_biased_cws_alpha_min,
+            ils_biased_cws_alpha_max=routing_config.ils_biased_cws_alpha_max,
             ils_random_seed=routing_config.ils_random_seed,
             show_progress=show_progress,
         )
