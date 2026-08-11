@@ -5,16 +5,18 @@
     "l'Eixample"
   ],
   "demand_scenario": "high",
-  "instance_size": 300,
+  "instance_size": 1000,
   "osrm_profile": "driving",
   "routing": {
     "algorithm": "ils",
     "ils_max_iterations": 100,
     "ils_max_no_improvement": 20,
-    "ils_perturbation_moves": 2,
-    "ils_random_seed": 42,
-    "cws_allow_route_reversal": false
-  },
+    "ils_destruction_percentage_step": 10,
+    "ils_max_destruction_percentage": 100,
+    "ils_biased_cws_alpha_min": 0.05,
+    "ils_biased_cws_alpha_max": 0.25,
+    "ils_random_seed": 42
+},
   "traffic": {
     "static_profile": "baseline",
     "static_multiplier_override": null,

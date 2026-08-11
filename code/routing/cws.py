@@ -1,8 +1,118 @@
+import math
+
 import numpy as np
 from tqdm.auto import tqdm
 from code.common.constants import SERVICE_TIME_PER_STOP_MIN
 from code.common.routing_utils import calculate_route_durations, calculate_routes_matrix_cost
 from time import perf_counter
+
+
+class _FenwickOrderStatisticSet:
+    """Compact order-statistic set used by biased-randomized CWS.
+
+    The structure initially contains positions ``0..size-1``. ``pop_rank(k)``
+    removes and returns the k-th remaining position in O(log n), avoiding the
+    O(n) list shifts that ``list.pop(k)`` would introduce for large savings
+    lists.
+    """
+
+    def __init__(self, size: int) -> None:
+        self.size = int(size)
+        self.remaining = int(size)
+        self.tree = np.empty(self.size + 1, dtype=np.int32)
+        self.tree[0] = 0
+
+        # For an all-ones Fenwick tree, tree[i] == lowbit(i). Fill in chunks to
+        # avoid allocating another array as large as the complete savings list.
+        chunk_size = 1_000_000
+        for start in range(1, self.size + 1, chunk_size):
+            end = min(start + chunk_size, self.size + 1)
+            indices = np.arange(start, end, dtype=np.int32)
+            self.tree[start:end] = indices & -indices
+
+    def pop_rank(self, rank: int) -> int:
+        if not 0 <= rank < self.remaining:
+            raise IndexError("rank is outside the remaining candidate set")
+
+        # Fenwick binary lifting: find the (rank + 1)-th active element.
+        target = rank + 1
+        index = 0
+        bit = 1 << (self.size.bit_length() - 1) if self.size else 0
+
+        while bit:
+            next_index = index + bit
+            if next_index <= self.size and self.tree[next_index] < target:
+                index = next_index
+                target -= int(self.tree[next_index])
+            bit >>= 1
+
+        fenwick_index = index + 1
+        selected_position = fenwick_index - 1
+
+        update_index = fenwick_index
+        while update_index <= self.size:
+            self.tree[update_index] -= 1
+            update_index += update_index & -update_index
+
+        self.remaining -= 1
+        return selected_position
+
+
+def _minimum_route_count_lower_bound(
+    *,
+    n_clients: int,
+    total_demand: float,
+    vehicle_capacity: float,
+    max_route_duration_min: float | None,
+    route_start_time_per_route_min: float,
+) -> int:
+    """Return a safe lower bound on the number of feasible routes."""
+
+    capacity_bound = max(1, math.ceil(total_demand / vehicle_capacity))
+
+    if max_route_duration_min is None:
+        return capacity_bound
+
+    available_service_time = (
+        float(max_route_duration_min) - float(route_start_time_per_route_min)
+    )
+    if available_service_time <= 0:
+        return n_clients
+
+    max_stops_from_service = max(
+        1,
+        math.floor(available_service_time / SERVICE_TIME_PER_STOP_MIN),
+    )
+    service_bound = math.ceil(n_clients / max_stops_from_service)
+    return max(capacity_bound, service_bound)
+
+
+def _biased_candidate_positions(
+    candidate_count: int,
+    *,
+    alpha_min: float,
+    alpha_max: float,
+    rng: np.random.Generator,
+):
+    """Yield savings-list positions using Juan et al.'s quasi-geometric bias.
+
+    Rank 0 is the best remaining saving. A fresh alpha is drawn uniformly from
+    ``[alpha_min, alpha_max]`` at every edge-selection step. A geometric draw
+    selects the rank; if it falls outside the finite current list, a uniform
+    fallback is used. This is equivalent to distributing the geometric tail
+    probability uniformly across the finite list (the paper's epsilon term).
+    """
+
+    active = _FenwickOrderStatisticSet(candidate_count)
+
+    while active.remaining:
+        alpha = float(rng.uniform(alpha_min, alpha_max))
+        rank = int(rng.geometric(alpha)) - 1
+
+        if rank >= active.remaining:
+            rank = int(rng.integers(0, active.remaining))
+
+        yield active.pop_rank(rank)
 
 
 def clarke_wright_savings(
@@ -16,6 +126,10 @@ def clarke_wright_savings(
     route_start_time_per_route_min: float = 0.0,
     show_progress: bool = False,
     allow_route_reversal: bool = False,
+    biased_randomization: bool = False,
+    biased_alpha_min: float = 0.05,
+    biased_alpha_max: float = 0.25,
+    rng: np.random.Generator | None = None,
 ):
     """
     Build capacity- and duration-feasible routes using parallel Clarke-Wright.
@@ -24,6 +138,24 @@ def clarke_wright_savings(
     Savings generation and sorting are vectorized with numpy; route merging
     remains a sequential pass (it depends on state built incrementally).
     """
+
+    if biased_randomization:
+        biased_alpha_min = float(biased_alpha_min)
+        biased_alpha_max = float(biased_alpha_max)
+        if not 0.0 < biased_alpha_min < 1.0:
+            raise ValueError(
+                "biased_alpha_min must be strictly between 0 and 1."
+            )
+        if not 0.0 < biased_alpha_max < 1.0:
+            raise ValueError(
+                "biased_alpha_max must be strictly between 0 and 1."
+            )
+        if biased_alpha_min > biased_alpha_max:
+            raise ValueError(
+                "biased_alpha_min cannot exceed biased_alpha_max."
+            )
+        if rng is None:
+            rng = np.random.default_rng()
 
     if n_clients <= 0:
         return 0.0, []
@@ -145,28 +277,57 @@ def clarke_wright_savings(
 
     order = np.argsort(flat_savings)[::-1]
 
-    sorted_i = flat_i[order].tolist()   # .tolist(): plain Python ints,
-    sorted_j = flat_j[order].tolist()   # much cheaper to loop over than
-                                          # numpy scalars.
+    sorted_i = flat_i[order]
+    sorted_j = flat_j[order]
 
     sorting_seconds = perf_counter() - sorting_start
     print(f"CWS savings sorted in {sorting_seconds:.2f} seconds.")
 
-    print("Starting CWS route merging...")
-    merging_start = perf_counter()
+    if biased_randomization:
+        print(
+            "Starting biased-randomized CWS route merging "
+            f"(alpha~U({biased_alpha_min:.3f}, {biased_alpha_max:.3f}))..."
+        )
+        candidate_positions = _biased_candidate_positions(
+            len(sorted_i),
+            alpha_min=biased_alpha_min,
+            alpha_max=biased_alpha_max,
+            rng=rng,
+        )
+    else:
+        print("Starting CWS route merging...")
+        candidate_positions = range(len(sorted_i))
 
+    merging_start = perf_counter()
     n_pairs = len(sorted_i)
+
+    lower_bound_routes = _minimum_route_count_lower_bound(
+        n_clients=n_clients,
+        total_demand=float(demands.sum()),
+        vehicle_capacity=vehicle_capacity,
+        max_route_duration_min=(
+            max_route_duration_min if duration_limit_enabled else None
+        ),
+        route_start_time_per_route_min=route_start_time_per_route_min,
+    )
+
     merge_progress = tqdm(
-        zip(sorted_i, sorted_j),
+        candidate_positions,
         total=n_pairs,
-        desc="CWS route merging",
+        desc=(
+            "BR-CWS route merging"
+            if biased_randomization
+            else "CWS route merging"
+        ),
         unit="saving",
         disable=not show_progress,
         mininterval=0.5,
         miniters=max(1, n_pairs // 1000),
         leave=False,
     )
-    for i, j in merge_progress:
+    for candidate_position in merge_progress:
+        i = int(sorted_i[candidate_position])
+        j = int(sorted_j[candidate_position])
         route_i_id = route_of[i]
         route_j_id = route_of[j]
 
@@ -222,13 +383,19 @@ def clarke_wright_savings(
         for client in merged_route:
             route_of[client] = route_i_id
 
+        # No further capacity-/service-feasible solution can contain fewer
+        # routes than this lower bound. Once reached, additional candidate
+        # processing cannot reduce the route count further.
+        if len(routes) <= lower_bound_routes:
+            break
+
     final_routes = list(routes.values())
     total_cost = calculate_routes_matrix_cost(matrix, final_routes)
 
     merging_seconds = perf_counter() - merging_start
 
     print(
-        f"CWS route merging completed in "
+        f"{'BR-CWS' if biased_randomization else 'CWS'} route merging completed in "
         f"{merging_seconds:.2f} seconds. "
         f"Final routes: {len(final_routes)}."
     )

@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+
+import pandas as pd
 
 from code.common.constants import CITIES, OSRM_PORTS
 from code.common.cost_utils import load_cost_parameters
@@ -22,6 +24,7 @@ from code.simulation.experiment_output import (
     build_metadata,
     create_experiment_directory,
     save_json,
+    slugify,
 )
 from code.simulation.facility_filter import FacilityFilterSettings
 from code.simulation.runner import simulate_city
@@ -94,6 +97,18 @@ def parse_arguments() -> argparse.Namespace:
         default=None,
         help="Guardar la geometría OSRM de cada ruta como WKT en los CSV.",
     )
+    parser.add_argument(
+        "--ils-biased-cws-alpha-min",
+        dest="ils_biased_cws_alpha_min",
+        type=float,
+        default=None,
+    )
+    parser.add_argument(
+        "--ils-biased-cws-alpha-max",
+        dest="ils_biased_cws_alpha_max",
+        type=float,
+        default=None,
+    )
     parser.add_argument("--ils-random-seed", type=int, default=None)
     parser.add_argument("--traffic-profile", default=None)
     parser.add_argument("--traffic-multiplier", type=float, default=None)
@@ -129,6 +144,8 @@ def main() -> None:
         ils_max_destruction_percentage=(
             config.routing.ils_max_destruction_percentage
         ),
+        ils_biased_cws_alpha_min=config.routing.ils_biased_cws_alpha_min,
+        ils_biased_cws_alpha_max=config.routing.ils_biased_cws_alpha_max,
         ils_random_seed=config.routing.ils_random_seed,
     )
 
@@ -256,6 +273,170 @@ def _run_city_experiment(
             profile=config.osrm_profile,
         )
 
+        neighborhood_status_rows = []
+        neighborhoods_folder = experiment_folder / "neighborhoods"
+        neighborhoods_folder.mkdir(parents=True, exist_ok=True)
+
+        def _write_neighborhood_status() -> None:
+            pd.DataFrame(neighborhood_status_rows).to_csv(
+                experiment_folder / "neighborhood_status.csv",
+                index=False,
+                encoding="utf-8-sig",
+            )
+
+        def _enrich_summary(frame: pd.DataFrame) -> pd.DataFrame:
+            frame = frame.copy()
+            frame["experiment_id"] = experiment_id
+            frame["routing_algorithm"] = routing_config.algorithm
+            frame["cws_allow_route_reversal"] = (
+                routing_config.cws_allow_route_reversal
+            )
+            frame["traffic_profile"] = traffic_profile.name
+            frame["traffic_duration_multiplier"] = (
+                traffic_profile.duration_multiplier
+            )
+            frame["traffic_source"] = traffic_profile.source
+            frame["time_traffic_profile"] = (
+                time_traffic_provider.profile_name
+            )
+            frame["simulation_date"] = shift_start.date().isoformat()
+            frame["simulation_day_of_week"] = (
+                shift_start.strftime("%A").lower()
+            )
+            frame["traffic_city_file"] = (
+                time_traffic_provider.source_path.name
+            )
+            frame["shift_start_time"] = shift_start.time().isoformat(
+                timespec="minutes"
+            )
+            frame["shift_end_time"] = shift_end.time().isoformat(
+                timespec="minutes"
+            )
+            return frame
+
+        def _save_completed_neighborhood(
+            *,
+            neighborhood_name,
+            zone_type,
+            results,
+            model_details,
+            audit_details,
+            runtime_seconds,
+        ) -> None:
+            finished = datetime.now()
+            started = finished - timedelta(seconds=float(runtime_seconds))
+            zone_slug = slugify(str(neighborhood_name))
+            zone_folder = neighborhoods_folder / zone_slug
+            routes_folder = zone_folder / "routes"
+            audit_folder = zone_folder / "audit"
+
+            routes_folder.mkdir(parents=True, exist_ok=True)
+            audit_folder.mkdir(parents=True, exist_ok=True)
+
+            zone_summary = _enrich_summary(results)
+            zone_summary.to_csv(
+                zone_folder / "summary.csv",
+                index=False,
+                encoding="utf-8-sig",
+            )
+
+            if config.output.save_route_details:
+                for model_code, detail_df in model_details.items():
+                    enriched = detail_df.assign(
+                        experiment_id=experiment_id,
+                        routing_algorithm=routing_config.algorithm,
+                        cws_allow_route_reversal=(
+                            routing_config.cws_allow_route_reversal
+                        ),
+                        selected_traffic_profile=traffic_profile.name,
+                    )
+                    enriched.to_csv(
+                        routes_folder / f"{model_code.lower()}_routes.csv",
+                        index=False,
+                        encoding="utf-8-sig",
+                    )
+
+            for audit_name, audit_df in audit_details.items():
+                enriched_audit = audit_df.assign(
+                    experiment_id=experiment_id,
+                    routing_algorithm=routing_config.algorithm,
+                )
+                enriched_audit.to_csv(
+                    audit_folder / f"{audit_name}.csv",
+                    index=False,
+                    encoding="utf-8-sig",
+                )
+
+            if config.output.save_metadata:
+                save_json(
+                    zone_folder / "metadata.json",
+                    build_metadata(
+                        experiment_id=f"{experiment_id}:{zone_slug}",
+                        started_at=started,
+                        finished_at=finished,
+                        status="completed",
+                    ),
+                )
+
+            neighborhood_status_rows.append(
+                {
+                    "neighborhood": neighborhood_name,
+                    "zone_type": zone_type,
+                    "status": "completed",
+                    "runtime_seconds": float(runtime_seconds),
+                    "error": "",
+                    "folder": str(zone_folder.relative_to(experiment_folder)),
+                }
+            )
+            _write_neighborhood_status()
+
+            print(
+                f"Incremental neighborhood output saved to: "
+                f"{zone_folder.resolve()}"
+            )
+
+        def _save_failed_neighborhood(
+            *,
+            neighborhood_name,
+            zone_type,
+            error,
+            runtime_seconds,
+        ) -> None:
+            finished = datetime.now()
+            started = finished - timedelta(seconds=float(runtime_seconds))
+            zone_slug = slugify(str(neighborhood_name))
+            zone_folder = neighborhoods_folder / zone_slug
+            zone_folder.mkdir(parents=True, exist_ok=True)
+
+            if config.output.save_metadata:
+                save_json(
+                    zone_folder / "metadata.json",
+                    build_metadata(
+                        experiment_id=f"{experiment_id}:{zone_slug}",
+                        started_at=started,
+                        finished_at=finished,
+                        status="failed",
+                        error=f"{type(error).__name__}: {error}",
+                    ),
+                )
+
+            neighborhood_status_rows.append(
+                {
+                    "neighborhood": neighborhood_name,
+                    "zone_type": zone_type,
+                    "status": "failed",
+                    "runtime_seconds": float(runtime_seconds),
+                    "error": f"{type(error).__name__}: {error}",
+                    "folder": str(zone_folder.relative_to(experiment_folder)),
+                }
+            )
+            _write_neighborhood_status()
+
+            print(
+                f"Failure metadata saved for neighborhood "
+                f"{neighborhood_name!r}; continuing with the next zone."
+            )
+
         results_df, model_detail_frames, audit_frames = simulate_city(
             city=active_city,
             demand_scenario=config.demand_scenario,
@@ -282,6 +463,9 @@ def _run_city_experiment(
                 config.facility_assignment.microhub_capacity_mode
             ),
             show_progress=config.output.show_progress,
+            zone_result_callback=_save_completed_neighborhood,
+            zone_failure_callback=_save_failed_neighborhood,
+            continue_on_zone_error=True,
         )
 
         results_df["experiment_id"] = experiment_id
@@ -354,6 +538,22 @@ def _run_city_experiment(
             )
 
         finished_at = datetime.now()
+        completed_zone_count = sum(
+            row["status"] == "completed"
+            for row in neighborhood_status_rows
+        )
+        failed_zone_count = sum(
+            row["status"] == "failed"
+            for row in neighborhood_status_rows
+        )
+
+        if failed_zone_count == 0:
+            experiment_status = "completed"
+        elif completed_zone_count > 0:
+            experiment_status = "partial"
+        else:
+            experiment_status = "failed"
+
         if config.output.save_metadata:
             save_json(
                 metadata_path,
@@ -361,7 +561,12 @@ def _run_city_experiment(
                     experiment_id=experiment_id,
                     started_at=started_at,
                     finished_at=finished_at,
-                    status="completed",
+                    status=experiment_status,
+                    error=(
+                        f"{failed_zone_count} neighborhood(s) failed."
+                        if failed_zone_count
+                        else None
+                    ),
                 ),
             )
         print(

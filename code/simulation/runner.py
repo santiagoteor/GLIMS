@@ -120,6 +120,8 @@ def simulate_neighborhood(
         ),
         ils_destruction_percentage_step=routing_config.ils_destruction_percentage_step,
         ils_max_destruction_percentage=routing_config.ils_max_destruction_percentage,
+        ils_biased_cws_alpha_min=routing_config.ils_biased_cws_alpha_min,
+        ils_biased_cws_alpha_max=routing_config.ils_biased_cws_alpha_max,
         ils_random_seed=routing_config.ils_random_seed,
         traffic_profile=traffic_profile,
         time_traffic_provider=time_traffic_provider,
@@ -210,6 +212,8 @@ def simulate_neighborhood(
             ),
             ils_destruction_percentage_step=routing_config.ils_destruction_percentage_step,
             ils_max_destruction_percentage=routing_config.ils_max_destruction_percentage,
+            ils_biased_cws_alpha_min=routing_config.ils_biased_cws_alpha_min,
+            ils_biased_cws_alpha_max=routing_config.ils_biased_cws_alpha_max,
             ils_random_seed=routing_config.ils_random_seed,
             traffic_profile=traffic_profile,
             time_traffic_provider=time_traffic_provider,
@@ -219,43 +223,7 @@ def simulate_neighborhood(
             show_progress=show_progress,
         )
 
-    if direct_routing_reusable:
-        m2_plan = m1_plan
-        print(
-            "M2 reusing M1 routing plan: YES "
-            "(identical direct-routing inputs and constraints)."
-        )
-    else:
-        print(
-            "M2 reusing M1 routing plan: NO "
-            "(vehicle capacities differ; running independent M2 routing)."
-        )
-
-        m2_plan = route_planner.build_capacity_plan(
-            depot_latitude=direct_cc_lat,
-            depot_longitude=direct_cc_lon,
-            clients=demand_points,
-            transport_mode="driving",
-            vehicle_capacity=m2_capacity,
-            client_demands=client_demands,
-            route_start_time_per_route_min=DIRECT_VAN_LOADING_TIME_PER_ROUTE_MIN,
-            routing_algorithm=routing_config.algorithm,
-            cws_allow_route_reversal=routing_config.cws_allow_route_reversal,
-            ils_max_iterations=routing_config.ils_max_iterations,
-            ils_max_iterations_without_improvement=(
-                routing_config.ils_max_iterations_without_improvement
-            ),
-            ils_perturbation_moves=routing_config.ils_perturbation_moves,
-            ils_random_seed=routing_config.ils_random_seed,
-            traffic_profile=traffic_profile,
-            time_traffic_provider=time_traffic_provider,
-            traffic_zone=neighborhood_name,
-            shift_start=shift_start,
-            shift_end=shift_end,
-            show_progress=show_progress,
-        )
-
-    # Direct models have no separate trunk leg: CWS includes CC departures/returns.
+        # Direct models have no separate trunk leg: CWS includes CC departures/returns.
     zero_trunk = 0.0
 
     # M3: supply every used microhub from one selected logistics center,
@@ -271,11 +239,15 @@ def simulate_neighborhood(
     )
     
 
-    m3_supply_plan, m3_supply_visits = calculate_facility_supply_route(
+    (
+        m3_supply_plan,
+        m3_supply_visits,
+        m3_microhub_available_at,
+    ) = calculate_facility_supply_route(
         city=city,
         selected_cc=m3_cc,
         used_facilities=used_microhubs,
-        truck_capacity=parameters["FURGONETA_CONV"]["capacidad"],
+        truck_capacity=parameters["FURGONETA_ELEC"]["capacidad"],
         facility_label="M3",
         routing_config=routing_config,
         traffic_profile=traffic_profile,
@@ -298,6 +270,8 @@ def simulate_neighborhood(
         bike_capacity=parameters["BICICLETA_CARGO"]["capacidad"],
         neighborhood_name=neighborhood_name,
         routing_config=routing_config,
+        facility_available_at=m3_microhub_available_at,
+        shift_end=shift_end,
         add_geometry=add_geometry,
         show_progress=show_progress,
     )
@@ -313,11 +287,15 @@ def simulate_neighborhood(
         osrm_host=osrm_host,
         osrm_profile=osrm_profile,
     )
-    pudo_supply_plan, pudo_supply_visits = calculate_facility_supply_route(
+    (
+        pudo_supply_plan,
+        pudo_supply_visits,
+        _pudo_available_at,
+    ) = calculate_facility_supply_route(
         city=city,
         selected_cc=pudo_cc,
         used_facilities=used_pudos,
-        truck_capacity=parameters["FURGONETA_CONV"]["capacidad"],
+        truck_capacity=parameters["FURGONETA_ELEC"]["capacidad"],
         facility_label="M4/M5",
         routing_config=routing_config,
         traffic_profile=traffic_profile,
@@ -436,7 +414,7 @@ def simulate_neighborhood(
         neighborhood_name=neighborhood_name,
         model_code="M3",
         leg="facility_supply",
-        vehicle_type="conventional_van",
+        vehicle_type="electric_van",
         depot_name=str(m3_cc["Location"]),
         plan=m3_supply_plan,
         clients=m3_supply_visits,
@@ -450,13 +428,13 @@ def simulate_neighborhood(
         neighborhood_name=neighborhood_name,
         model_code="M4",
         leg="facility_supply",
-        vehicle_type="conventional_van",
+        vehicle_type="electric_van",
         depot_name=str(pudo_cc["Location"]),
         plan=pudo_supply_plan,
         clients=pudo_supply_visits,
         stop_label_column="Location",
-        depot_latitude=float(m3_cc["Latitude"]),
-        depot_longitude=float(m3_cc["Longitude"]),
+        depot_latitude=float(pudo_cc["Latitude"]),
+        depot_longitude=float(pudo_cc["Longitude"]),
         add_geometry=add_geometry,
     )
     m5_supply_detail_rows = [
@@ -611,6 +589,9 @@ def simulate_city(
     pudo_capacity_mode: str = "configured",
     microhub_capacity_mode: str = "configured",
     show_progress: bool = False,
+    zone_result_callback=None,
+    zone_failure_callback=None,
+    continue_on_zone_error: bool = False,
 ):
     centers, boundaries, parameters_df = load_city_data(city)
     demand_instance = load_demand_instance(city, demand_scenario, instance_size)
@@ -650,138 +631,174 @@ def simulate_city(
         start=1,
     ):
         zone_start = perf_counter()
-        neighborhood_name = neighborhood["zona"]
-        zone_type = neighborhood["tipo"]
-        print(f"\nSimulating {city.upper()} - {neighborhood_name} ({zone_type})")
-        print("\n" + "=" * 60)
-        print(
-            f"ZONE {zone_number}/{total_zones}: "
-            f"{neighborhood_name} ({zone_type})"
-        )
-        print("=" * 60)
-        demand_points = filter_points_by_neighborhood(demand_instance, neighborhood)
-        if demand_points.empty:
-            print(f"No demand stops within {neighborhood_name}.")
-            continue
- 
-        demand_centroid = calculate_demand_weighted_centroid(demand_points)
-        microhub_point = select_operational_point(
-            strategy="nearest_microhub_facility",
-            neighborhood_records=demand_points,
-            classified_records=classified_locations,
-            target_latitude=demand_centroid.latitude,
-            target_longitude=demand_centroid.longitude,
-        )
-        pudo_point = select_operational_point(
-            strategy="nearest_pudo_facility",
-            neighborhood_records=demand_points,
-            classified_records=classified_locations,
-            target_latitude=demand_centroid.latitude,
-            target_longitude=demand_centroid.longitude,
-        )
- 
-        candidate_microhubs = filter_facilities_for_zone(
-            facilities=microhubs,
-            neighborhood=neighborhood,
-            settings=effective_filter_settings,
-            zone_crs=boundaries.crs,
-            facility_label="Microhub",
-        )
-        candidate_pudos = filter_facilities_for_zone(
-            facilities=pudos,
-            neighborhood=neighborhood,
-            settings=effective_filter_settings,
-            zone_crs=boundaries.crs,
-            facility_label="PUDO",
-        )
-
-        microhub_capacity = (
-            None
-            if microhub_capacity_mode == "unlimited"
-            else float(parameters["MICROHUB"]["capacidad"])
-        )
-        pudo_capacity = (
-            None
-            if pudo_capacity_mode == "unlimited"
-            else float(parameters["PUDO"]["capacidad"])
-        )
-
-        assigned_microhubs = assign_customers_to_nearest_facility(
-            customers=demand_points,
-            facilities=candidate_microhubs,
-            osrm_host=osrm_host,
-            osrm_profile="cycling",
-            facility_capacity=microhub_capacity,
-            show_progress=show_progress,
-            progress_label="Assigning customers to microhubs",
-        )
-
-        print(
-            f"Candidate microhubs: {len(candidate_microhubs)} of "
-            f"{len(microhubs)} city microhubs | "
-            f"used: {assigned_microhubs['assigned_facility'].nunique()} | "
-            f"capacity mode: {microhub_capacity_mode}"
-        )
-
-        assigned_pudos = assign_customers_to_nearest_facility(
-            customers=demand_points,
-            facilities=candidate_pudos,
-            osrm_host=osrm_host,
-            osrm_profile="walking",
-            facility_capacity=pudo_capacity,
-            show_progress=show_progress,
-            progress_label="Assigning customers to PUDOs",
-        )
-
-        print(
-            f"Candidate PUDOs: {len(candidate_pudos)} of "
-            f"{len(pudos)} city PUDOs | "
-            f"used: {assigned_pudos['assigned_facility'].nunique()} | "
-            f"capacity mode: {pudo_capacity_mode}"
-        )
-
-        results, model_details, audit_details = simulate_neighborhood(
-            city=city,
-            neighborhood_name=neighborhood_name,
-            demand_points=demand_points,
-            demand_centroid=demand_centroid,
-            microhub_point=microhub_point,
-            pudo_point=pudo_point,
-            assigned_pudos=assigned_pudos,
-            assigned_microhubs=assigned_microhubs,
-            centers=centers,
-            parameters=parameters,
-            cost_parameters=cost_parameters,
-            osrm_host=osrm_host,
-            osrm_profile=osrm_profile,
-            routing_config=routing_config,
-            traffic_profile=traffic_profile,
-            time_traffic_provider=time_traffic_provider,
-            shift_start=shift_start,
-            shift_end=shift_end,
-            add_geometry=add_geometry,
-            show_progress=show_progress,
-        )
- 
-        all_results.extend(results)
-        for model_code, detail_rows in model_details.items():
-            all_model_details[model_code].extend(detail_rows)
-        for audit_name, audit_rows in audit_details.items():
-            all_audit_details[audit_name].extend(audit_rows)
-        print(
-            f"{neighborhood_name} ({zone_type}): {len(demand_points)} customers, "
-            f"{int(demand_points['Demand'].sum())} packages simulated"
-        )
-        
-        zone_runtime = perf_counter() - zone_start
-        total_runtime = perf_counter() - simulation_start
-
-        print(
-            f"Completed zone {zone_number}/{total_zones} "
-            f"in {zone_runtime:.1f} s "
-            f"(total elapsed: {total_runtime:.1f} s)"
-        )
- 
+        try:
+            neighborhood_name = neighborhood["zona"]
+            zone_type = neighborhood["tipo"]
+            print(f"\nSimulating {city.upper()} - {neighborhood_name} ({zone_type})")
+            print("\n" + "=" * 60)
+            print(
+                f"ZONE {zone_number}/{total_zones}: "
+                f"{neighborhood_name} ({zone_type})"
+            )
+            print("=" * 60)
+            demand_points = filter_points_by_neighborhood(demand_instance, neighborhood)
+            if demand_points.empty:
+                print(f"No demand stops within {neighborhood_name}.")
+                continue
+     
+            demand_centroid = calculate_demand_weighted_centroid(demand_points)
+            microhub_point = select_operational_point(
+                strategy="nearest_microhub_facility",
+                neighborhood_records=demand_points,
+                classified_records=classified_locations,
+                target_latitude=demand_centroid.latitude,
+                target_longitude=demand_centroid.longitude,
+            )
+            pudo_point = select_operational_point(
+                strategy="nearest_pudo_facility",
+                neighborhood_records=demand_points,
+                classified_records=classified_locations,
+                target_latitude=demand_centroid.latitude,
+                target_longitude=demand_centroid.longitude,
+            )
+     
+            candidate_microhubs = filter_facilities_for_zone(
+                facilities=microhubs,
+                neighborhood=neighborhood,
+                settings=effective_filter_settings,
+                zone_crs=boundaries.crs,
+                facility_label="Microhub",
+            )
+            candidate_pudos = filter_facilities_for_zone(
+                facilities=pudos,
+                neighborhood=neighborhood,
+                settings=effective_filter_settings,
+                zone_crs=boundaries.crs,
+                facility_label="PUDO",
+            )
+    
+            microhub_capacity = (
+                None
+                if microhub_capacity_mode == "unlimited"
+                else float(parameters["MICROHUB"]["capacidad"])
+            )
+            pudo_capacity = (
+                None
+                if pudo_capacity_mode == "unlimited"
+                else float(parameters["PUDO"]["capacidad"])
+            )
+    
+            assigned_microhubs = assign_customers_to_nearest_facility(
+                customers=demand_points,
+                facilities=candidate_microhubs,
+                osrm_host=osrm_host,
+                osrm_profile="cycling",
+                facility_capacity=microhub_capacity,
+                show_progress=show_progress,
+                progress_label="Assigning customers to microhubs",
+            )
+    
+            print(
+                f"Candidate microhubs: {len(candidate_microhubs)} of "
+                f"{len(microhubs)} city microhubs | "
+                f"used: {assigned_microhubs['assigned_facility'].nunique()} | "
+                f"capacity mode: {microhub_capacity_mode}"
+            )
+    
+            assigned_pudos = assign_customers_to_nearest_facility(
+                customers=demand_points,
+                facilities=candidate_pudos,
+                osrm_host=osrm_host,
+                osrm_profile="walking",
+                facility_capacity=pudo_capacity,
+                show_progress=show_progress,
+                progress_label="Assigning customers to PUDOs",
+            )
+    
+            print(
+                f"Candidate PUDOs: {len(candidate_pudos)} of "
+                f"{len(pudos)} city PUDOs | "
+                f"used: {assigned_pudos['assigned_facility'].nunique()} | "
+                f"capacity mode: {pudo_capacity_mode}"
+            )
+    
+            results, model_details, audit_details = simulate_neighborhood(
+                city=city,
+                neighborhood_name=neighborhood_name,
+                demand_points=demand_points,
+                demand_centroid=demand_centroid,
+                microhub_point=microhub_point,
+                pudo_point=pudo_point,
+                assigned_pudos=assigned_pudos,
+                assigned_microhubs=assigned_microhubs,
+                centers=centers,
+                parameters=parameters,
+                cost_parameters=cost_parameters,
+                osrm_host=osrm_host,
+                osrm_profile=osrm_profile,
+                routing_config=routing_config,
+                traffic_profile=traffic_profile,
+                time_traffic_provider=time_traffic_provider,
+                shift_start=shift_start,
+                shift_end=shift_end,
+                add_geometry=add_geometry,
+                show_progress=show_progress,
+            )
+     
+            all_results.extend(results)
+            for model_code, detail_rows in model_details.items():
+                all_model_details[model_code].extend(detail_rows)
+            for audit_name, audit_rows in audit_details.items():
+                all_audit_details[audit_name].extend(audit_rows)
+            print(
+                f"{neighborhood_name} ({zone_type}): {len(demand_points)} customers, "
+                f"{int(demand_points['Demand'].sum())} packages simulated"
+            )
+            
+            zone_runtime = perf_counter() - zone_start
+            total_runtime = perf_counter() - simulation_start
+    
+            print(
+                f"Completed zone {zone_number}/{total_zones} "
+                f"in {zone_runtime:.1f} s "
+                f"(total elapsed: {total_runtime:.1f} s)"
+            )
+     
+            if zone_result_callback is not None:
+                zone_result_callback(
+                    neighborhood_name=neighborhood_name,
+                    zone_type=zone_type,
+                    results=pd.DataFrame(results),
+                    model_details={
+                        model_code: pd.DataFrame(detail_rows)
+                        for model_code, detail_rows in model_details.items()
+                    },
+                    audit_details={
+                        audit_name: pd.DataFrame(audit_rows)
+                        for audit_name, audit_rows in audit_details.items()
+                    },
+                    runtime_seconds=zone_runtime,
+                )
+        except Exception as exc:
+            zone_runtime = perf_counter() - zone_start
+            neighborhood_name = locals().get(
+                "neighborhood_name", f"zone_{zone_number}"
+            )
+            zone_type = locals().get("zone_type", "unknown")
+            print(
+                f"Zone {neighborhood_name} failed after {zone_runtime:.1f} s: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            if zone_failure_callback is not None:
+                zone_failure_callback(
+                    neighborhood_name=neighborhood_name,
+                    zone_type=zone_type,
+                    error=exc,
+                    runtime_seconds=zone_runtime,
+                )
+            if continue_on_zone_error:
+                continue
+            raise
     return (
         pd.DataFrame(all_results),
         {
