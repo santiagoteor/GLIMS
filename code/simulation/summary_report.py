@@ -18,6 +18,7 @@ COMPACT_COLUMNS = [
     "km_recorridos",
     "numero_viajes",
     "emisiones_co2_kg",
+    "emisiones_nox_kg",
     "costo_operacion_ruta_eur",
     "costo_servicio_facility_eur",
     "otros_costos_eur",
