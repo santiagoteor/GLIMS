@@ -98,15 +98,30 @@ def load_demand_instance(
     city: str,
     scenario: str,
     instance_size: int,
+    *,
+    demand_seed: int | None = None,
+    demand_instance_id: str | None = None,
 ) -> pd.DataFrame:
-    """Load one immutable demand instance and normalize its routing schema."""
+    """Load one immutable demand instance and normalize its routing schema.
 
-    demand_path = (
-        RESULTS_DIR
-        / city
-        / "demand"
-        / f"demand_{scenario}_{instance_size}.csv"
-    )
+    Backward compatibility is preserved: when neither ``demand_seed`` nor
+    ``demand_instance_id`` is provided, the legacy
+    ``demand_<scenario>_<size>.csv`` filename is used.
+    """
+
+    demand_folder = RESULTS_DIR / city / "demand"
+    if demand_instance_id is not None:
+        filename = str(demand_instance_id)
+        if not filename.lower().endswith(".csv"):
+            filename += ".csv"
+        demand_path = demand_folder / filename
+    elif demand_seed is not None:
+        demand_path = (
+            demand_folder
+            / f"demand_{scenario}_{instance_size}_seed_{int(demand_seed)}.csv"
+        )
+    else:
+        demand_path = demand_folder / f"demand_{scenario}_{instance_size}.csv"
 
     if not demand_path.exists():
         raise FileNotFoundError(
@@ -134,4 +149,37 @@ def load_demand_instance(
     if (demand["Demand"] <= 0).any():
         raise ValueError("Every demand record must contain a positive package demand.")
 
+    if "scenario" in demand.columns:
+        observed_scenarios = set(demand["scenario"].dropna().astype(str))
+        if observed_scenarios and observed_scenarios != {scenario}:
+            raise ValueError(
+                f"Demand instance {demand_path.name} contains scenario values "
+                f"{sorted(observed_scenarios)}, expected {scenario!r}."
+            )
+    if "instance_size" in demand.columns:
+        observed_sizes = set(
+            pd.to_numeric(demand["instance_size"], errors="coerce")
+            .dropna()
+            .astype(int)
+        )
+        if observed_sizes and observed_sizes != {int(instance_size)}:
+            raise ValueError(
+                f"Demand instance {demand_path.name} contains instance_size "
+                f"values {sorted(observed_sizes)}, expected {instance_size}."
+            )
+
+    resolved_seed = int(demand_seed) if demand_seed is not None else None
+    if resolved_seed is None and "demand_seed" in demand.columns:
+        seed_values = (
+            pd.to_numeric(demand["demand_seed"], errors="coerce")
+            .dropna()
+            .astype(int)
+            .unique()
+        )
+        if len(seed_values) == 1:
+            resolved_seed = int(seed_values[0])
+
+    demand.attrs["demand_source_file"] = demand_path.name
+    demand.attrs["demand_instance_id"] = demand_path.stem
+    demand.attrs["demand_seed"] = resolved_seed
     return demand

@@ -1,3 +1,7 @@
+import hashlib
+from pathlib import Path
+from time import perf_counter
+
 import requests
 from code.common.constants import (
     OSRM_PORTS,
@@ -6,6 +10,144 @@ from code.common.constants import (
     OSRM_TABLE_MIN_BLOCK_SIZE,
 )
 import numpy as np
+
+
+_OSRM_CACHE_ENABLED = False
+_OSRM_CACHE_DIRECTORY = Path(".glims_cache") / "osrm"
+_OSRM_CACHE_FORMAT_VERSION = "v1"
+
+_OSRM_CACHE_STATS = {
+    "cache_hits": 0,
+    "cache_misses": 0,
+    "cache_load_seconds": 0.0,
+    "cache_write_seconds": 0.0,
+    "http_requests": 0,
+    "http_seconds": 0.0,
+}
+
+
+def configure_osrm_matrix_cache(
+    *,
+    enabled: bool,
+    directory: str | Path = ".glims_cache/osrm",
+) -> None:
+    """Configure the local content-addressed OSRM matrix cache."""
+    global _OSRM_CACHE_ENABLED, _OSRM_CACHE_DIRECTORY
+    _OSRM_CACHE_ENABLED = bool(enabled)
+    _OSRM_CACHE_DIRECTORY = Path(directory)
+    if _OSRM_CACHE_ENABLED:
+        _OSRM_CACHE_DIRECTORY.mkdir(parents=True, exist_ok=True)
+
+
+def reset_osrm_cache_stats() -> None:
+    for key in _OSRM_CACHE_STATS:
+        _OSRM_CACHE_STATS[key] = (
+            0 if key in {"cache_hits", "cache_misses", "http_requests"} else 0.0
+        )
+
+
+def get_osrm_cache_stats() -> dict[str, int | float]:
+    return dict(_OSRM_CACHE_STATS)
+
+
+def _normalized_coord_bytes(coords) -> bytes:
+    return ";".join(
+        f"{float(lon):.6f},{float(lat):.6f}"
+        for lon, lat in coords
+    ).encode("utf-8")
+
+
+def _matrix_cache_path(
+    *,
+    matrix_kind: str,
+    host: str,
+    profile: str,
+    source_coords,
+    destination_coords=None,
+) -> Path:
+    digest = hashlib.sha256()
+    for part in (
+        _OSRM_CACHE_FORMAT_VERSION,
+        matrix_kind,
+        host,
+        profile,
+    ):
+        digest.update(str(part).encode("utf-8"))
+        digest.update(b"\0")
+    digest.update(_normalized_coord_bytes(source_coords))
+    if destination_coords is not None:
+        digest.update(b"\0DEST\0")
+        digest.update(_normalized_coord_bytes(destination_coords))
+    return _OSRM_CACHE_DIRECTORY / f"{matrix_kind}_{digest.hexdigest()}.npz"
+
+
+def _load_cached_matrices(path: Path):
+    if not _OSRM_CACHE_ENABLED:
+        return None
+    if not path.exists():
+        _OSRM_CACHE_STATS["cache_misses"] += 1
+        return None
+
+    started = perf_counter()
+    try:
+        with np.load(path, allow_pickle=False) as payload:
+            distance_matrix = np.asarray(payload["distance"], dtype=float)
+            duration_matrix = np.asarray(payload["duration"], dtype=float)
+    except Exception as exc:
+        print(
+            f"OSRM cache entry unreadable; rebuilding {path.name}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        _OSRM_CACHE_STATS["cache_misses"] += 1
+        return None
+
+    elapsed = perf_counter() - started
+    _OSRM_CACHE_STATS["cache_hits"] += 1
+    _OSRM_CACHE_STATS["cache_load_seconds"] += elapsed
+    print(
+        f"OSRM matrix cache HIT: {path.name} "
+        f"{distance_matrix.shape} in {elapsed:.2f} s"
+    )
+    return distance_matrix, duration_matrix
+
+
+def _save_cached_matrices(
+    path: Path,
+    distance_matrix: np.ndarray,
+    duration_matrix: np.ndarray,
+) -> None:
+    if not _OSRM_CACHE_ENABLED:
+        return
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp.npz")
+    started = perf_counter()
+
+    # Uncompressed and float64 on purpose: faster I/O and no routing precision
+    # changes versus the matrices returned directly by OSRM.
+    np.savez(
+        temporary,
+        distance=np.asarray(distance_matrix, dtype=np.float64),
+        duration=np.asarray(duration_matrix, dtype=np.float64),
+    )
+    temporary.replace(path)
+
+    elapsed = perf_counter() - started
+    _OSRM_CACHE_STATS["cache_write_seconds"] += elapsed
+    print(
+        f"OSRM matrix cache WRITE: {path.name} "
+        f"{distance_matrix.shape} in {elapsed:.2f} s"
+    )
+
+
+def _record_http_request(started: float) -> None:
+    _OSRM_CACHE_STATS["http_requests"] += 1
+    _OSRM_CACHE_STATS["http_seconds"] += perf_counter() - started
+
 
 def get_osrm_host(city: str, profile: str) -> str:
     """Return the city- and profile-specific local OSRM endpoint."""
@@ -65,7 +207,9 @@ def osrm_table(
     if destinations is not None:
         params["destinations"] = ";".join(str(i) for i in destinations)
 
+    _http_started = perf_counter()
     response = requests.get(url, params=params, timeout=60)
+    _record_http_request(_http_started)
     response.raise_for_status()
     payload = response.json()
 
@@ -98,7 +242,9 @@ def _request_osrm_distance_duration_table(
             str(index) for index in destinations
         )
 
+    _http_started = perf_counter()
     response = requests.get(url, params=params, timeout=180)
+    _record_http_request(_http_started)
 
     try:
         response.raise_for_status()
@@ -214,6 +360,17 @@ def osrm_distance_duration_table_rectangular(
     source_coords = list(source_coords)
     destination_coords = list(destination_coords)
 
+    cache_path = _matrix_cache_path(
+        matrix_kind="rect",
+        host=host,
+        profile=profile,
+        source_coords=source_coords,
+        destination_coords=destination_coords,
+    )
+    cached = _load_cached_matrices(cache_path)
+    if cached is not None:
+        return cached
+
     source_count = len(source_coords)
     destination_count = len(destination_coords)
 
@@ -307,6 +464,7 @@ def osrm_distance_duration_table_rectangular(
                     end="\r" if completed < request_count else "\n",
                 )
 
+    _save_cached_matrices(cache_path, distance_matrix, duration_matrix)
     return distance_matrix, duration_matrix
 
 def osrm_distance_duration_table(
@@ -315,10 +473,20 @@ def osrm_distance_duration_table(
     host: str,
     profile: str,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return complete OSRM matrices, chunking large requests automatically."""
+    """Return complete OSRM matrices, chunking and caching automatically."""
+    coords = list(coords)
+    cache_path = _matrix_cache_path(
+        matrix_kind="square",
+        host=host,
+        profile=profile,
+        source_coords=coords,
+    )
+    cached = _load_cached_matrices(cache_path)
+    if cached is not None:
+        return cached
 
     try:
-        return _request_osrm_distance_duration_table(
+        result = _request_osrm_distance_duration_table(
             coords,
             host=host,
             profile=profile,
@@ -329,15 +497,17 @@ def osrm_distance_duration_table(
             raise
 
         block_size = min(OSRM_TABLE_BLOCK_SIZE, max(1, len(coords)))
+        result = None
 
         while block_size >= OSRM_TABLE_MIN_BLOCK_SIZE:
             try:
-                return _build_chunked_osrm_table(
+                result = _build_chunked_osrm_table(
                     coords,
                     host=host,
                     profile=profile,
                     block_size=block_size,
                 )
+                break
             except requests.exceptions.HTTPError as chunk_exc:
                 chunk_status = getattr(chunk_exc.response, "status_code", None)
                 if chunk_status not in {400, 414}:
@@ -351,16 +521,20 @@ def osrm_distance_duration_table(
                         "OSRM_TABLE_MIN_BLOCK_SIZE. "
                         f"Last error: {chunk_exc}"
                     ) from chunk_exc
-
                 print(
                     f"OSRM rejected block size {block_size}; retrying with "
                     f"{next_block_size}."
                 )
                 block_size = next_block_size
 
-        raise RuntimeError(
-            "Could not build the OSRM table with the configured block sizes."
-        ) from exc
+        if result is None:
+            raise RuntimeError(
+                "Could not build the OSRM table with the configured block sizes."
+            ) from exc
+
+    distance_matrix, duration_matrix = result
+    _save_cached_matrices(cache_path, distance_matrix, duration_matrix)
+    return distance_matrix, duration_matrix
 
 
 
@@ -385,7 +559,9 @@ def osrm_route_geometry(
         "continue_straight": "false",
     }
 
+    _http_started = perf_counter()
     response = requests.get(url, params=params, timeout=60)
+    _record_http_request(_http_started)
     response.raise_for_status()
     payload = response.json()
 

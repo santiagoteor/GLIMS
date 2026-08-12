@@ -13,7 +13,11 @@ from code.common.constants import CITIES, OSRM_PORTS
 from code.common.cost_utils import load_cost_parameters
 from code.common.paths import DATA_DIR, RESULTS_DIR
 from code.routing.config import RoutingAlgorithmConfig
-from code.routing.osrm_client import check_osrm_server, get_osrm_host
+from code.routing.osrm_client import (
+    check_osrm_server,
+    configure_osrm_matrix_cache,
+    get_osrm_host,
+)
 from code.simulation.experiment_config import (
     ExperimentConfig,
     default_experiment_config,
@@ -28,6 +32,7 @@ from code.simulation.experiment_output import (
 )
 from code.simulation.facility_filter import FacilityFilterSettings
 from code.simulation.runner import simulate_city
+from code.simulation.summary_report import build_summary_export
 from code.simulation.traffic import load_traffic_profile
 from code.traffic.provider import TimeTrafficProvider
 from code.traffic.schedule import build_shift
@@ -61,6 +66,17 @@ def parse_arguments() -> argparse.Namespace:
         default=None,
     )
     parser.add_argument("--instance-size", type=int, default=None)
+    parser.add_argument(
+        "--demand-seed",
+        type=int,
+        default=None,
+        help="Select demand_<scenario>_<size>_seed_<seed>.csv.",
+    )
+    parser.add_argument(
+        "--demand-instance-id",
+        default=None,
+        help="Explicit demand CSV filename or stem inside results/<city>/demand.",
+    )
     parser.add_argument(
         "--profile",
         choices=tuple(OSRM_PORTS["madrid"]),
@@ -158,6 +174,11 @@ def main() -> None:
     config = resolve_experiment_config(
         base=base_config,
         overrides=vars(args),
+    )
+
+    configure_osrm_matrix_cache(
+        enabled=config.osrm_cache.enabled,
+        directory=config.osrm_cache.directory,
     )
 
     routing_config = RoutingAlgorithmConfig(
@@ -284,6 +305,15 @@ def _run_city_experiment(
         print(f"Simulation zones: {config.zones}")
         print(f"OSRM host: {active_host}")
         print(f"OSRM profile: {config.osrm_profile}")
+        print(
+            "OSRM matrix cache: "
+            f"{'ENABLED' if config.osrm_cache.enabled else 'DISABLED'}"
+            + (
+                f" | {config.osrm_cache.directory}"
+                if config.osrm_cache.enabled
+                else ""
+            )
+        )
         print(f"Routing algorithm: {routing_config.algorithm.upper()}")
         print(
             "Traffic profile used during route construction: "
@@ -317,35 +347,36 @@ def _run_city_experiment(
                 encoding="utf-8-sig",
             )
 
-        def _enrich_summary(frame: pd.DataFrame) -> pd.DataFrame:
-            frame = frame.copy()
-            frame["experiment_id"] = experiment_id
-            frame["routing_algorithm"] = routing_config.algorithm
-            frame["cws_allow_route_reversal"] = (
-                routing_config.cws_allow_route_reversal
+        def _enrich_summary(
+            frame: pd.DataFrame,
+            model_details: dict[str, pd.DataFrame],
+        ) -> pd.DataFrame:
+            return build_summary_export(
+                frame,
+                model_details=model_details,
+                summary_detail=config.output.summary_detail,
+                experiment_id=experiment_id,
+                routing_algorithm=routing_config.algorithm,
+                routing_seed=routing_config.ils_random_seed,
+                cws_allow_route_reversal=(
+                    routing_config.cws_allow_route_reversal
+                ),
+                traffic_profile_name=traffic_profile.name,
+                traffic_duration_multiplier=(
+                    traffic_profile.duration_multiplier
+                ),
+                traffic_source=traffic_profile.source,
+                time_traffic_profile=time_traffic_provider.profile_name,
+                simulation_date=shift_start.date().isoformat(),
+                simulation_day_of_week=(
+                    shift_start.strftime("%A").lower()
+                ),
+                traffic_city_file=(
+                    time_traffic_provider.source_path.name
+                ),
+                shift_start=shift_start,
+                shift_end=shift_end,
             )
-            frame["traffic_profile"] = traffic_profile.name
-            frame["traffic_duration_multiplier"] = (
-                traffic_profile.duration_multiplier
-            )
-            frame["traffic_source"] = traffic_profile.source
-            frame["time_traffic_profile"] = (
-                time_traffic_provider.profile_name
-            )
-            frame["simulation_date"] = shift_start.date().isoformat()
-            frame["simulation_day_of_week"] = (
-                shift_start.strftime("%A").lower()
-            )
-            frame["traffic_city_file"] = (
-                time_traffic_provider.source_path.name
-            )
-            frame["shift_start_time"] = shift_start.time().isoformat(
-                timespec="minutes"
-            )
-            frame["shift_end_time"] = shift_end.time().isoformat(
-                timespec="minutes"
-            )
-            return frame
 
         def _save_completed_neighborhood(
             *,
@@ -366,7 +397,7 @@ def _run_city_experiment(
             routes_folder.mkdir(parents=True, exist_ok=True)
             audit_folder.mkdir(parents=True, exist_ok=True)
 
-            zone_summary = _enrich_summary(results)
+            zone_summary = _enrich_summary(results, model_details)
             zone_summary.to_csv(
                 zone_folder / "summary.csv",
                 index=False,
@@ -475,6 +506,8 @@ def _run_city_experiment(
             demand_scenario=config.demand_scenario,
             instance_size=config.instance_size,
             active_zones=config.zones,
+            demand_seed=config.demand_seed,
+            demand_instance_id=config.demand_instance_id,
             osrm_host=active_host,
             osrm_profile=config.osrm_profile,
             routing_config=routing_config,
@@ -501,25 +534,9 @@ def _run_city_experiment(
             continue_on_zone_error=True,
         )
 
-        results_df["experiment_id"] = experiment_id
-        results_df["routing_algorithm"] = routing_config.algorithm
-        results_df["cws_allow_route_reversal"] = routing_config.cws_allow_route_reversal
-        results_df["traffic_profile"] = traffic_profile.name
-        results_df["traffic_duration_multiplier"] = (
-            traffic_profile.duration_multiplier
-        )
-        results_df["traffic_source"] = traffic_profile.source
-        results_df["time_traffic_profile"] = (
-            time_traffic_provider.profile_name
-        )
-        results_df["simulation_date"] = shift_start.date().isoformat()
-        results_df["simulation_day_of_week"] = shift_start.strftime("%A").lower()
-        results_df["traffic_city_file"] = time_traffic_provider.source_path.name
-        results_df["shift_start_time"] = shift_start.time().isoformat(
-            timespec="minutes"
-        )
-        results_df["shift_end_time"] = shift_end.time().isoformat(
-            timespec="minutes"
+        results_df = _enrich_summary(
+            results_df,
+            model_detail_frames,
         )
         results_df.to_csv(
             experiment_folder / "summary.csv",

@@ -51,11 +51,18 @@ class FacilityAssignmentExperimentConfig:
 
 
 @dataclass(frozen=True)
+class OsrmCacheExperimentConfig:
+    enabled: bool = False
+    directory: str = ".glims_cache/osrm"
+
+
+@dataclass(frozen=True)
 class OutputExperimentConfig:
     save_route_details: bool = True
     save_configuration: bool = True
     save_metadata: bool = True
     save_route_geometry: bool = False
+    summary_detail: str = "full"
     show_progress: bool = False
 
 @dataclass(frozen=True)
@@ -65,6 +72,8 @@ class ExperimentConfig:
     zones: list[str] | None = None
     demand_scenario: str = "medium"
     instance_size: int = 100
+    demand_seed: int | None = None
+    demand_instance_id: str | None = None
     osrm_profile: str = "driving"
     routing: RoutingExperimentConfig = field(
         default_factory=RoutingExperimentConfig
@@ -77,6 +86,9 @@ class ExperimentConfig:
     )
     facility_assignment: FacilityAssignmentExperimentConfig = field(
         default_factory=FacilityAssignmentExperimentConfig
+    )
+    osrm_cache: OsrmCacheExperimentConfig = field(
+        default_factory=OsrmCacheExperimentConfig
     )
     output: OutputExperimentConfig = field(
         default_factory=OutputExperimentConfig
@@ -106,6 +118,16 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         zones=_normalize_zones(raw.get("zones")),
         demand_scenario=str(raw.get("demand_scenario", "medium")),
         instance_size=int(raw.get("instance_size", 100)),
+        demand_seed=(
+            int(raw["demand_seed"])
+            if raw.get("demand_seed") is not None
+            else None
+        ),
+        demand_instance_id=(
+            str(raw["demand_instance_id"])
+            if raw.get("demand_instance_id") is not None
+            else None
+        ),
         osrm_profile=str(raw.get("osrm_profile", "driving")),
         routing=RoutingExperimentConfig(**raw.get("routing", {})),
         traffic=TrafficExperimentConfig(**raw.get("traffic", {})),
@@ -114,6 +136,9 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         ),
         facility_assignment=FacilityAssignmentExperimentConfig(
             **raw.get("facility_assignment", {})
+        ),
+        osrm_cache=OsrmCacheExperimentConfig(
+            **raw.get("osrm_cache", {})
         ),
         output=OutputExperimentConfig(**raw.get("output", {})),
     )
@@ -135,6 +160,21 @@ def validate_experiment_config(config: ExperimentConfig) -> None:
         )
     if config.instance_size <= 0:
         raise ValueError("instance_size must be greater than zero.")
+    if config.output.summary_detail not in {"compact", "full"}:
+        raise ValueError(
+            "output.summary_detail must be either 'compact' or 'full'."
+        )
+    if config.demand_instance_id is not None:
+        instance_id = config.demand_instance_id
+        if Path(instance_id).name != instance_id:
+            raise ValueError(
+                "demand_instance_id must be a filename/stem, not a path."
+            )
+    if config.demand_seed is not None and config.demand_instance_id is not None:
+        raise ValueError(
+            "Use either demand_seed or demand_instance_id, not both. "
+            "demand_instance_id is intended for explicit file selection."
+        )
     if config.osrm_profile not in OSRM_PORTS["madrid"]:
         raise ValueError(
             f"Unsupported OSRM profile: {config.osrm_profile!r}."
@@ -198,6 +238,8 @@ def validate_experiment_config(config: ExperimentConfig) -> None:
             "facility_assignment.microhub_capacity_mode must be "
             "'configured' or 'unlimited'."
         )
+    if not str(config.osrm_cache.directory).strip():
+        raise ValueError("osrm_cache.directory cannot be empty.")
     if config.traffic.shift_duration_min <= 0:
         raise ValueError("shift_duration_min must be greater than zero.")
     if (
@@ -299,6 +341,8 @@ def resolve_experiment_config(
             overrides.get("save_route_geometry"),
             base.output.save_route_geometry,
         ),
+        summary_detail=base.output.summary_detail,
+        show_progress=base.output.show_progress,
     )
     resolved = ExperimentConfig(
         experiment_name=base.experiment_name,
@@ -312,6 +356,14 @@ def resolve_experiment_config(
             overrides.get("instance_size"),
             base.instance_size,
         ),
+        demand_seed=_pick(
+            overrides.get("demand_seed"),
+            base.demand_seed,
+        ),
+        demand_instance_id=_pick(
+            overrides.get("demand_instance_id"),
+            base.demand_instance_id,
+        ),
         osrm_profile=_pick(
             overrides.get("profile"),
             base.osrm_profile,
@@ -321,6 +373,7 @@ def resolve_experiment_config(
         output=output,
         facility_filter=base.facility_filter,
         facility_assignment=base.facility_assignment,
+        osrm_cache=base.osrm_cache,
     )
     validate_experiment_config(resolved)
     return resolved

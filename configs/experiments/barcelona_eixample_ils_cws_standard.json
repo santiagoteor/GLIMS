@@ -6,6 +6,7 @@
   ],
   "demand_scenario": "low",
   "instance_size": 1000,
+  "demand_seed": 42,
   "osrm_profile": "driving",
   "routing": {
     "algorithm": "ils",
@@ -34,7 +35,8 @@
     "save_route_details": true,
     "save_configuration": true,
     "save_metadata": true,
-    "save_route_geometry": true,
+    "save_route_geometry": false,
+    "summary_detail": "compact",
     "show_progress": true
   },
   "facility_filter": {
@@ -47,5 +49,9 @@
   "facility_assignment": {
     "pudo_capacity_mode": "unlimited",
     "microhub_capacity_mode": "unlimited"
+  },
+  "osrm_cache": {
+    "enabled": true,
+    "directory": ".glims_cache/osrm"
   }
 }
