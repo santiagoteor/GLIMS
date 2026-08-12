@@ -27,6 +27,7 @@ def _build_result(
     total_km: float,
     trip_count: int,
     co2_kg: float,
+    nox_kg: float,
     costs: CostBreakdown,
 ):
     """Build one result row with a common, auditable cost breakdown."""
@@ -68,6 +69,7 @@ def _build_result(
         "km_recorridos": total_km,
         "numero_viajes": trip_count,
         "emisiones_co2_kg": co2_kg,
+        "emisiones_nox_kg": nox_kg,
         "costo_operacion_ruta_eur": costs.route_operating_cost,
         "costo_servicio_facility_eur": costs.facility_service_cost,
         "otros_costos_eur": (
@@ -127,6 +129,13 @@ def simulate_m1(
         ),
     )
     co2_kg = (route_plan.total_distance_km * model["co2_km"]) / 1000
+    nox_factor_g_km = model.get("nox_km_estimado_cliente", 0.0)
+    nox_factor_g_km = (
+        0.0
+        if pd.isna(nox_factor_g_km)
+        else float(nox_factor_g_km)
+    )
+    nox_kg = (route_plan.total_distance_km * nox_factor_g_km) / 1000
 
     additional = calculate_additional_costs(
         package_count=package_count,
@@ -168,6 +177,7 @@ def simulate_m1(
         total_km=route_plan.total_distance_km,
         trip_count=route_plan.route_count,
         co2_kg=co2_kg,
+        nox_kg=nox_kg,
         costs=costs,
     )
 
@@ -198,6 +208,7 @@ def simulate_m2(
         ),
     )
     co2_kg = 0.0
+    nox_kg = 0.0
 
     additional = calculate_additional_costs(
         package_count=package_count,
@@ -239,6 +250,7 @@ def simulate_m2(
         total_km=route_plan.total_distance_km,
         trip_count=route_plan.route_count,
         co2_kg=co2_kg,
+        nox_kg=nox_kg,
         costs=costs,
     )
 
@@ -293,6 +305,7 @@ def simulate_m3(
     )
 
     supply_co2 = 0.0  # Electric van: zero direct/tailpipe CO2 emissions.
+    nox_kg = 0.0  # Electric van / cargo bike / walking: zero direct NOx.
     route_distance_cost = supply_distance_cost + bike_distance_cost
     route_labor_cost = supply_labor_cost + bike_labor_cost
 
@@ -361,6 +374,7 @@ def simulate_m3(
         total_km=supply_plan.total_distance_km + bike_distance_km,
         trip_count=supply_plan.route_count + bike_route_count,
         co2_kg=supply_co2,
+        nox_kg=nox_kg,
         costs=costs,
     )
 
@@ -415,6 +429,7 @@ def simulate_m4(
     )
 
     supply_co2 = 0.0  # Electric van: zero direct/tailpipe CO2 emissions.
+    nox_kg = 0.0  # Electric van / cargo bike / walking: zero direct NOx.
     route_distance_cost = supply_distance_cost + walking_distance_cost
     route_labor_cost = supply_labor_cost + walking_labor_cost
     pudo_commission = get_cost_parameter(
@@ -486,6 +501,7 @@ def simulate_m4(
         total_km=supply_plan.total_distance_km + walking_distance_km,
         trip_count=total_routes,
         co2_kg=supply_co2,
+        nox_kg=nox_kg,
         costs=costs,
     )
 
@@ -523,6 +539,7 @@ def simulate_m5(
         ),
     )
     supply_co2 = 0.0  # Electric van: zero direct/tailpipe CO2 emissions.
+    nox_kg = 0.0  # Electric van / cargo bike / walking: zero direct NOx.
     customer_co2 = (
         customer_travel_km * float(model.get("co2_km_estimado_cliente", 0.0) or 0.0)
     ) / 1000
@@ -581,5 +598,6 @@ def simulate_m5(
         total_km=supply_plan.total_distance_km + customer_travel_km,
         trip_count=supply_plan.route_count + customer_count,
         co2_kg=co2_kg,
+        nox_kg=nox_kg,
         costs=costs,
     )
