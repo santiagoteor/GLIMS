@@ -18,9 +18,11 @@ def _build_result(
     *,
     city: str,
     neighborhood_name: str,
+    model_code: str,
     model_name: str,
     selected_cc: pd.Series,
-    last_mile_point: OperationalPoint,
+    last_mile_point: OperationalPoint | None,
+    used_last_mile_point_count: int,
     package_count: int,
     total_km: float,
     trip_count: int,
@@ -29,16 +31,39 @@ def _build_result(
 ):
     """Build one result row with a common, auditable cost breakdown."""
 
+    single_facility = (
+        last_mile_point is not None
+        and int(used_last_mile_point_count) == 1
+    )
+
     return {
         "ciudad": city,
         "barrio": neighborhood_name,
+        "model_code": model_code,
         "modelo": model_name,
         "centro_logistico": selected_cc["Location"],
-        "punto_ultima_milla": last_mile_point.name,
-        "latitud_punto_ultima_milla": last_mile_point.latitude,
-        "longitud_punto_ultima_milla": last_mile_point.longitude,
-        "tipo_punto_ultima_milla": last_mile_point.point_type,
-        "estrategia_punto_ultima_milla": last_mile_point.strategy,
+        "punto_ultima_milla": (
+            last_mile_point.name if single_facility else None
+        ),
+        "latitud_punto_ultima_milla": (
+            last_mile_point.latitude if single_facility else None
+        ),
+        "longitud_punto_ultima_milla": (
+            last_mile_point.longitude if single_facility else None
+        ),
+        "tipo_punto_ultima_milla": (
+            last_mile_point.point_type
+            if last_mile_point is not None
+            else None
+        ),
+        "estrategia_punto_ultima_milla": (
+            last_mile_point.strategy
+            if last_mile_point is not None
+            else None
+        ),
+        "numero_puntos_ultima_milla_usados": int(
+            used_last_mile_point_count
+        ),
         "paquetes": package_count,
         "km_recorridos": total_km,
         "numero_viajes": trip_count,
@@ -81,7 +106,6 @@ def simulate_m1(
     city: str,
     neighborhood_name: str,
     selected_cc: pd.Series,
-    last_mile_point: OperationalPoint,
     package_count: int,
     route_plan: OsrmRoutePlan,
     parameters: dict,
@@ -135,9 +159,11 @@ def simulate_m1(
     return _build_result(
         city=city,
         neighborhood_name=neighborhood_name,
+        model_code="M1",
         model_name="M1: Furgoneta Combustión desde CC",
         selected_cc=selected_cc,
-        last_mile_point=last_mile_point,
+        last_mile_point=None,
+        used_last_mile_point_count=0,
         package_count=package_count,
         total_km=route_plan.total_distance_km,
         trip_count=route_plan.route_count,
@@ -151,7 +177,6 @@ def simulate_m2(
     city: str,
     neighborhood_name: str,
     selected_cc: pd.Series,
-    last_mile_point: OperationalPoint,
     package_count: int,
     route_plan: OsrmRoutePlan,
     parameters: dict,
@@ -205,9 +230,11 @@ def simulate_m2(
     return _build_result(
         city=city,
         neighborhood_name=neighborhood_name,
+        model_code="M2",
         model_name="M2: Furgoneta Eléctrica desde CC",
         selected_cc=selected_cc,
-        last_mile_point=last_mile_point,
+        last_mile_point=None,
+        used_last_mile_point_count=0,
         package_count=package_count,
         total_km=route_plan.total_distance_km,
         trip_count=route_plan.route_count,
@@ -325,9 +352,11 @@ def simulate_m3(
     return _build_result(
         city=city,
         neighborhood_name=neighborhood_name,
+        model_code="M3",
         model_name="M3: CC -> Microhubs -> Bicicleta",
         selected_cc=selected_cc,
         last_mile_point=last_mile_point,
+        used_last_mile_point_count=used_microhub_count,
         package_count=package_count,
         total_km=supply_plan.total_distance_km + bike_distance_km,
         trip_count=supply_plan.route_count + bike_route_count,
@@ -448,9 +477,11 @@ def simulate_m4(
     return _build_result(
         city=city,
         neighborhood_name=neighborhood_name,
+        model_code="M4",
         model_name="M4: CC -> PUDOs -> Entrega a pie",
         selected_cc=selected_cc,
         last_mile_point=last_mile_point,
+        used_last_mile_point_count=used_pudo_count,
         package_count=package_count,
         total_km=supply_plan.total_distance_km + walking_distance_km,
         trip_count=total_routes,
@@ -541,9 +572,11 @@ def simulate_m5(
     return _build_result(
         city=city,
         neighborhood_name=neighborhood_name,
+        model_code="M5",
         model_name="M5: CC -> PUDOs -> Recogida Cliente",
         selected_cc=selected_cc,
         last_mile_point=last_mile_point,
+        used_last_mile_point_count=used_pudo_count,
         package_count=package_count,
         total_km=supply_plan.total_distance_km + customer_travel_km,
         trip_count=supply_plan.route_count + customer_count,

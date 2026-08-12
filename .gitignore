@@ -63,3 +63,5 @@ Thumbs.db
 *:Zone.Identifier
 ~$*
 
+# Local OSRM matrix cache (large and machine-specific)
+.glims_cache/

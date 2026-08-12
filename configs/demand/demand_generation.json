@@ -1,0 +1,33 @@
+{
+  "cities": [
+    "barcelona",
+    "madrid",
+    "valencia"
+  ],
+  "scenarios": [
+    "low",
+    "medium",
+    "high"
+  ],
+  "sizes": [
+    100,
+    200,
+    300,
+    400,
+    600,
+    800,
+    1000,
+    8000,
+    10000,
+    17200,
+    40000
+  ],
+  "seeds": [
+    42,
+    101,
+    202,
+    303,
+    404
+  ],
+  "overwrite": false
+}
