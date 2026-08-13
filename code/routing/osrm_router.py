@@ -88,6 +88,7 @@ class CapacityAwareOsrmRouter:
         vehicle_capacity: float,
         client_demands=None,
         max_route_duration_min: float | None = MAX_ROUTE_DURATION_MIN,
+        max_last_stop_completion_min: float | None = None,
         route_start_time_per_route_min: float = 0.0,
         routing_algorithm: str = "cws",
         cws_allow_route_reversal: bool = False,
@@ -95,6 +96,7 @@ class CapacityAwareOsrmRouter:
         ils_max_iterations_without_improvement: int | None = 20,
         ils_destruction_percentage_step: float = 10.0,
         ils_max_destruction_percentage: float = 100.0,
+        ils_max_full_destruction_attempts: int = 2,
         ils_biased_cws_alpha_min: float = 0.05,
         ils_biased_cws_alpha_max: float = 0.25,
         ils_restricted_relocate: bool = True,
@@ -234,6 +236,7 @@ class CapacityAwareOsrmRouter:
                 client_demands=client_demands,
                 duration_matrix=duration_matrix,
                 max_route_duration_min=max_route_duration_min,
+                max_last_stop_completion_min=max_last_stop_completion_min,
                 route_start_time_per_route_min=route_start_time_per_route_min,
                 show_progress=show_progress,
                 allow_route_reversal=cws_allow_route_reversal,
@@ -257,6 +260,7 @@ class CapacityAwareOsrmRouter:
                 client_demands=client_demands,
                 duration_matrix=duration_matrix,
                 max_route_duration_min=max_route_duration_min,
+                max_last_stop_completion_min=max_last_stop_completion_min,
                 route_start_time_per_route_min=route_start_time_per_route_min,
                 show_progress=show_progress,
                 allow_route_reversal=cws_allow_route_reversal,
@@ -284,6 +288,7 @@ class CapacityAwareOsrmRouter:
                 client_demands=client_demands,
                 duration_matrix=duration_matrix,
                 max_route_duration_min=max_route_duration_min,
+                max_last_stop_completion_min=max_last_stop_completion_min,
                 route_start_time_per_route_min=route_start_time_per_route_min,
                 max_iterations=ils_max_iterations,
                 max_iterations_without_improvement=(
@@ -291,6 +296,9 @@ class CapacityAwareOsrmRouter:
                 ),
                 destruction_percentage_step=ils_destruction_percentage_step,
                 max_destruction_percentage=ils_max_destruction_percentage,
+                max_full_destruction_attempts=(
+                    ils_max_full_destruction_attempts
+                ),
                 biased_cws_alpha_min=ils_biased_cws_alpha_min,
                 biased_cws_alpha_max=ils_biased_cws_alpha_max,
                 restricted_relocate=ils_restricted_relocate,
@@ -361,6 +369,53 @@ class CapacityAwareOsrmRouter:
                 )
                 for route in routes
             ]
+            if (
+                max_last_stop_completion_min is not None
+                and shift_start is not None
+            ):
+                actual_cutoff = shift_start + timedelta(
+                    minutes=float(max_last_stop_completion_min)
+                )
+                late_route_count = 0
+                latest_service_completion = None
+
+                for timeline in route_timelines:
+                    non_depot_segments = [
+                        segment
+                        for segment in timeline.segments
+                        if segment.destination_index != 0
+                    ]
+                    if not non_depot_segments:
+                        continue
+
+                    last_delivery_segment = non_depot_segments[-1]
+                    service_completion = (
+                        last_delivery_segment.arrival_datetime
+                        + timedelta(minutes=float(SERVICE_TIME_PER_STOP_MIN))
+                    )
+                    if (
+                        latest_service_completion is None
+                        or service_completion > latest_service_completion
+                    ):
+                        latest_service_completion = service_completion
+
+                    if service_completion > actual_cutoff:
+                        late_route_count += 1
+
+                if late_route_count:
+                    print(
+                        "WARNING [last-service deadline]: "
+                        f"{late_route_count} route(s) exceed the configured "
+                        "last-service cutoff after time-dependent traffic "
+                        "evaluation. Latest service completion="
+                        f"{latest_service_completion.isoformat(timespec='minutes')}."
+                    )
+                else:
+                    print(
+                        "Last-service deadline audit: all route services "
+                        f"finish by {actual_cutoff.isoformat(timespec='minutes')}."
+                    )
+
             route_durations = [
                 timeline.total_duration_min for timeline in route_timelines
             ]
@@ -549,6 +604,33 @@ def calculate_facility_supply_route(
         f"{len(supply_visits)} capacity-feasible visits"
     )
 
+    max_last_stop_completion_min = None
+    supply_cutoff: datetime | None = None
+
+    if routing_config.last_service_deadline_enabled:
+        if shift_start is None or shift_end is None:
+            raise ValueError(
+                "shift_start and shift_end are required when the supply "
+                "arrival deadline is enabled."
+            )
+
+        margin_min = float(routing_config.last_service_margin_min)
+        shift_duration_min = (shift_end - shift_start).total_seconds() / 60.0
+        if margin_min < 0 or margin_min >= shift_duration_min:
+            raise ValueError(
+                "last_service_margin_min must be non-negative and smaller "
+                "than the configured shift duration."
+            )
+
+        max_last_stop_completion_min = shift_duration_min - margin_min
+        supply_cutoff = shift_end - timedelta(minutes=margin_min)
+        print(
+            f"{facility_label} last-service deadline: "
+            f"facility service cutoff="
+            f"{supply_cutoff.isoformat(timespec='minutes')} "
+            f"(margin={margin_min:.1f} min)."
+        )
+
     router = CapacityAwareOsrmRouter(city)
     plan = router.build_capacity_plan(
         depot_latitude=float(selected_cc["Latitude"]),
@@ -558,6 +640,7 @@ def calculate_facility_supply_route(
         vehicle_capacity=truck_capacity,
         client_demands=supply_visits["Demand"].to_numpy(dtype=float),
         max_route_duration_min=max_route_duration_min,
+        max_last_stop_completion_min=max_last_stop_completion_min,
         route_start_time_per_route_min=TRUCK_LOADING_TIME_PER_ROUTE_MIN,
         routing_algorithm=routing_config.algorithm,
         cws_allow_route_reversal=routing_config.cws_allow_route_reversal,
@@ -567,6 +650,9 @@ def calculate_facility_supply_route(
         ),
         ils_destruction_percentage_step=routing_config.ils_destruction_percentage_step,
         ils_max_destruction_percentage=routing_config.ils_max_destruction_percentage,
+        ils_max_full_destruction_attempts=(
+            routing_config.ils_max_full_destruction_attempts
+        ),
         ils_biased_cws_alpha_min=routing_config.ils_biased_cws_alpha_min,
         ils_biased_cws_alpha_max=routing_config.ils_biased_cws_alpha_max,
         ils_restricted_relocate=routing_config.ils_restricted_relocate,
@@ -636,6 +722,31 @@ def calculate_facility_supply_route(
                 previous = facility_available_at.get(facility_name)
                 if previous is None or available_at > previous:
                     facility_available_at[facility_name] = available_at
+
+        if supply_cutoff is not None:
+            late_facilities = {
+                name: available_at
+                for name, available_at in facility_available_at.items()
+                if available_at > supply_cutoff
+            }
+            if late_facilities:
+                latest_name, latest_time = max(
+                    late_facilities.items(),
+                    key=lambda item: item[1],
+                )
+                print(
+                    f"WARNING [{facility_label} last-service deadline]: "
+                    f"{len(late_facilities)} facilities exceed the cutoff "
+                    "after time-dependent traffic evaluation. "
+                    f"Latest={latest_name!r} at "
+                    f"{latest_time.isoformat(timespec='minutes')}."
+                )
+            else:
+                print(
+                    f"{facility_label} last-service deadline audit: "
+                    f"all {len(facility_available_at)} facilities are "
+                    "available within the configured cutoff."
+                )
 
     return plan, supply_visits, facility_available_at
 

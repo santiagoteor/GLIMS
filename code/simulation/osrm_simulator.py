@@ -194,6 +194,9 @@ def main() -> None:
         ils_max_destruction_percentage=(
             config.routing.ils_max_destruction_percentage
         ),
+        ils_max_full_destruction_attempts=(
+            config.routing.ils_max_full_destruction_attempts
+        ),
         ils_biased_cws_alpha_min=config.routing.ils_biased_cws_alpha_min,
         ils_biased_cws_alpha_max=config.routing.ils_biased_cws_alpha_max,
         ils_restricted_relocate=config.routing.ils_restricted_relocate,
@@ -201,6 +204,10 @@ def main() -> None:
         ils_relocate_neighbor_routes=config.routing.ils_relocate_neighbor_routes,
         ils_relocate_max_insertions=config.routing.ils_relocate_max_insertions,
         ils_random_seed=config.routing.ils_random_seed,
+        last_service_deadline_enabled=(
+            config.routing.last_service_deadline_enabled
+        ),
+        last_service_margin_min=config.routing.last_service_margin_min,
     )
 
     try:
