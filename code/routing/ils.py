@@ -460,7 +460,8 @@ def _local_search(
     duration_matrix: np.ndarray | None = None,
     max_route_duration_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
-) -> tuple[float, list[list[int]]]:
+    return_stats: bool = False,
+):
     
     print(
         f"Starting local search for {len(routes)} routes "
@@ -476,10 +477,19 @@ def _local_search(
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
     )
+    two_opt_seconds = perf_counter() - stage_start
     print(
         f"Local search stage completed in "
-        f"{perf_counter() - stage_start:.2f} seconds."
+        f"{two_opt_seconds:.2f} seconds."
     )
+
+    relocate_seconds = 0.0
+    relocate_stats = {
+        "candidate_clients": 0,
+        "moves_evaluated": 0,
+        "moves_accepted": 0,
+        "improvement_km": 0.0,
+    }
 
     if restricted_relocate:
         if vehicle_capacity is None or client_demands is None:
@@ -511,19 +521,45 @@ def _local_search(
             )
         )
 
+        relocate_seconds = perf_counter() - relocate_start
         print(
             "Restricted relocate completed in "
-            f"{perf_counter() - relocate_start:.2f} seconds | "
+            f"{relocate_seconds:.2f} seconds | "
             f"candidates={relocate_stats['candidate_clients']} | "
             f"evaluated={relocate_stats['moves_evaluated']} | "
             f"accepted={relocate_stats['moves_accepted']} | "
             f"improvement={relocate_stats['improvement_km']:.3f} km"
         )
 
+    local_search_seconds = perf_counter() - local_search_start
     print(
         f"Local search completed in "
-        f"{perf_counter() - local_search_start:.2f} seconds."
+        f"{local_search_seconds:.2f} seconds."
     )
+
+    if return_stats:
+        return (
+            final_cost,
+            final_routes,
+            {
+                "total_seconds": float(local_search_seconds),
+                "two_opt_seconds": float(two_opt_seconds),
+                "relocate_seconds": float(relocate_seconds),
+                "relocate_candidate_clients": int(
+                    relocate_stats["candidate_clients"]
+                ),
+                "relocate_moves_evaluated": int(
+                    relocate_stats["moves_evaluated"]
+                ),
+                "relocate_moves_accepted": int(
+                    relocate_stats["moves_accepted"]
+                ),
+                "relocate_improvement_km": float(
+                    relocate_stats["improvement_km"]
+                ),
+            },
+        )
+
     return final_cost, final_routes
 
 
@@ -705,7 +741,8 @@ def iterated_local_search(
     show_progress: bool = False,
     cws_allow_route_reversal: bool = False,
     return_stats: bool = False,
-) -> tuple[float, list[list[int]]] | tuple[float, list[list[int]], int, int]:
+    profiling_callback=None,
+):
     """
     Build a feasible routing solution using Iterated Local Search.
 
@@ -783,7 +820,8 @@ def iterated_local_search(
 
     rng = np.random.default_rng(random_seed)
 
-    _, initial_routes = clarke_wright_savings(
+    initial_cws_started = perf_counter()
+    initial_cws_cost, initial_routes = clarke_wright_savings(
         matrix=matrix,
         n_clients=n_clients,
         vehicle_capacity=vehicle_capacity,
@@ -794,8 +832,19 @@ def iterated_local_search(
         show_progress=show_progress,
         allow_route_reversal=cws_allow_route_reversal,
     )
+    initial_cws_seconds = perf_counter() - initial_cws_started
+    if profiling_callback is not None:
+        profiling_callback({
+            "stage": "m3_ils_initial_cws",
+            "seconds": initial_cws_seconds,
+            "detail": {
+                "clients": n_clients,
+                "routes": len(initial_routes),
+                "cost_km": float(initial_cws_cost),
+            },
+        })
 
-    current_cost, current_routes = _local_search(
+    current_cost, current_routes, initial_ls_stats = _local_search(
         initial_routes,
         matrix,
         vehicle_capacity=vehicle_capacity,
@@ -807,7 +856,14 @@ def iterated_local_search(
         duration_matrix=duration_matrix,
         max_route_duration_min=max_route_duration_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
+        return_stats=True,
     )
+    if profiling_callback is not None:
+        profiling_callback({
+            "stage": "m3_ils_initial_local_search",
+            "seconds": initial_ls_stats["total_seconds"],
+            "detail": initial_ls_stats,
+        })
 
     best_cost = current_cost
     best_routes = [route.copy() for route in current_routes]
@@ -831,22 +887,29 @@ def iterated_local_search(
             max_destruction_percentage,
         )
 
-        perturbed_routes = destruction_reconstruction(
+        reconstruction_started = perf_counter()
+        remaining_routes, freed_clients = destroy_routes(
             current_routes,
+            destruction_percentage,
+            rng,
+        )
+        rebuilt_routes = reconstruct_routes(
+            freed_clients,
             matrix,
             vehicle_capacity,
             demands,
-            destruction_percentage,
-            rng,
             duration_matrix=duration_matrix,
             max_route_duration_min=max_route_duration_min,
             route_start_time_per_route_min=route_start_time_per_route_min,
             cws_allow_route_reversal=cws_allow_route_reversal,
             biased_cws_alpha_min=biased_cws_alpha_min,
             biased_cws_alpha_max=biased_cws_alpha_max,
+            rng=rng,
         )
+        perturbed_routes = remaining_routes + rebuilt_routes
+        reconstruction_seconds = perf_counter() - reconstruction_started
 
-        candidate_cost, candidate_routes = _local_search(
+        candidate_cost, candidate_routes, candidate_ls_stats = _local_search(
             perturbed_routes,
             matrix,
             vehicle_capacity=vehicle_capacity,
@@ -858,9 +921,13 @@ def iterated_local_search(
             duration_matrix=duration_matrix,
             max_route_duration_min=max_route_duration_min,
             route_start_time_per_route_min=route_start_time_per_route_min,
+            return_stats=True,
         )
 
-        if candidate_cost < current_cost - 1e-9:
+        base_cost_before_acceptance = current_cost
+        accepted = candidate_cost < current_cost - 1e-9
+
+        if accepted:
             current_cost = candidate_cost
             current_routes = [route.copy() for route in candidate_routes]
 
@@ -872,6 +939,59 @@ def iterated_local_search(
                 best_routes = [route.copy() for route in candidate_routes]
         else:
             iterations_without_improvement += 1
+
+        if profiling_callback is not None:
+            profiling_callback({
+                "stage": "m3_ils_iteration",
+                "seconds": (
+                    reconstruction_seconds
+                    + candidate_ls_stats["total_seconds"]
+                ),
+                "detail": {
+                    "iteration": iterations_completed,
+                    "destruction_percentage": float(
+                        destruction_percentage
+                        if not accepted
+                        else 0.0
+                    ),
+                    "destruction_percentage_attempted": float(
+                        min(
+                            destruction_percentage_step
+                            if accepted
+                            else destruction_percentage,
+                            max_destruction_percentage,
+                        )
+                    ),
+                    "freed_clients": len(freed_clients),
+                    "remaining_routes": len(remaining_routes),
+                    "rebuilt_routes": len(rebuilt_routes),
+                    "reconstruction_seconds": float(reconstruction_seconds),
+                    "two_opt_seconds": float(
+                        candidate_ls_stats["two_opt_seconds"]
+                    ),
+                    "relocate_seconds": float(
+                        candidate_ls_stats["relocate_seconds"]
+                    ),
+                    "relocate_candidates": int(
+                        candidate_ls_stats["relocate_candidate_clients"]
+                    ),
+                    "relocate_moves_evaluated": int(
+                        candidate_ls_stats["relocate_moves_evaluated"]
+                    ),
+                    "relocate_moves_accepted": int(
+                        candidate_ls_stats["relocate_moves_accepted"]
+                    ),
+                    "base_cost_before_km": float(
+                        base_cost_before_acceptance
+                    ),
+                    "candidate_cost_km": float(candidate_cost),
+                    "best_cost_km": float(best_cost),
+                    "accepted": bool(accepted),
+                    "iterations_without_improvement": int(
+                        iterations_without_improvement
+                    ),
+                },
+            })
 
         if show_progress:
             iteration_progress.set_postfix(
