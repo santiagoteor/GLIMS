@@ -648,6 +648,7 @@ def reconstruct_routes(
     biased_cws_alpha_max: float = 0.25,
     rng: np.random.Generator | None = None,
     show_progress: bool = False,
+    profiling_callback=None,
 ) -> list[list[int]]:
 
     if not freed_clients:
@@ -691,6 +692,7 @@ def reconstruct_routes(
         biased_alpha_min=biased_cws_alpha_min,
         biased_alpha_max=biased_cws_alpha_max,
         rng=rng,
+        profiling_callback=profiling_callback,
     )
 
     print(
@@ -863,6 +865,7 @@ def iterated_local_search(
         route_start_time_per_route_min=route_start_time_per_route_min,
         show_progress=show_progress,
         allow_route_reversal=cws_allow_route_reversal,
+        profiling_callback=profiling_callback,
     )
     initial_cws_seconds = perf_counter() - initial_cws_started
     if profiling_callback is not None:
@@ -941,6 +944,7 @@ def iterated_local_search(
             biased_cws_alpha_min=biased_cws_alpha_min,
             biased_cws_alpha_max=biased_cws_alpha_max,
             rng=rng,
+            profiling_callback=profiling_callback,
         )
         perturbed_routes = remaining_routes + rebuilt_routes
         reconstruction_seconds = perf_counter() - reconstruction_started
