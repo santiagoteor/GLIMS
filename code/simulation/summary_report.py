@@ -178,7 +178,24 @@ def build_summary_export(
     for row_index, row in output.iterrows():
         model_code = str(row.get("model_code", "")).strip()
         detail = model_details.get(model_code)
-        metrics = _timeline_metrics(detail, shift_end=shift_end)
+
+        # M5 ends operationally when the operator completes PUDO supply.
+        # Customer collection remains outside the controlled system timeline.
+        timeline_detail = detail
+        if (
+            model_code == "M5"
+            and detail is not None
+            and not detail.empty
+            and "leg" in detail.columns
+        ):
+            timeline_detail = detail.loc[
+                detail["leg"].eq("facility_supply")
+            ].copy()
+
+        metrics = _timeline_metrics(
+            timeline_detail,
+            shift_end=shift_end,
+        )
         for key, value in metrics.items():
             output.at[row_index, key] = value
 

@@ -101,6 +101,14 @@ def simulate_neighborhood(
 
     performance_rows = []
 
+    # The configured shift duration is the common maximum standalone route
+    # duration used by routing. For M3/M4, the real supply arrival is applied
+    # later to the timeline; a late facility arrival may therefore generate
+    # shift overtime instead of making the whole simulation fail.
+    shift_duration_min = (shift_end - shift_start).total_seconds() / 60.0
+    if shift_duration_min <= 0:
+        raise ValueError("The configured shift duration must be greater than zero.")
+
     def timed_stage(stage: str, category: str, model: str | None = None):
         class _Stage:
             def __enter__(self_inner):
@@ -160,6 +168,7 @@ def simulate_neighborhood(
             transport_mode="driving",
             vehicle_capacity=parameters["FURGONETA_CONV"]["capacidad"],
             client_demands=client_demands,
+            max_route_duration_min=shift_duration_min,
             route_start_time_per_route_min=DIRECT_VAN_LOADING_TIME_PER_ROUTE_MIN,
             routing_algorithm=routing_config.algorithm,
             cws_allow_route_reversal=routing_config.cws_allow_route_reversal,
@@ -268,6 +277,7 @@ def simulate_neighborhood(
                 transport_mode="driving",
                 vehicle_capacity=m2_capacity,
                 client_demands=client_demands,
+                max_route_duration_min=shift_duration_min,
                 route_start_time_per_route_min=DIRECT_VAN_LOADING_TIME_PER_ROUTE_MIN,
                 routing_algorithm=routing_config.algorithm,
                 cws_allow_route_reversal=routing_config.cws_allow_route_reversal,
@@ -319,6 +329,7 @@ def simulate_neighborhood(
             used_facilities=used_microhubs,
             truck_capacity=parameters["FURGONETA_ELEC"]["capacidad"],
             facility_label="M3",
+            max_route_duration_min=shift_duration_min,
             routing_config=routing_config,
             traffic_profile=traffic_profile,
             time_traffic_provider=time_traffic_provider,
@@ -341,8 +352,10 @@ def simulate_neighborhood(
             bike_capacity=parameters["BICICLETA_CARGO"]["capacidad"],
             neighborhood_name=neighborhood_name,
             routing_config=routing_config,
+            max_route_duration_min=shift_duration_min,
             facility_available_at=m3_microhub_available_at,
             shift_end=shift_end,
+            performance_rows=performance_rows,
             add_geometry=add_geometry,
             show_progress=show_progress,
         )
@@ -362,13 +375,14 @@ def simulate_neighborhood(
         (
             pudo_supply_plan,
             pudo_supply_visits,
-            _pudo_available_at,
+            pudo_available_at,
         ) = calculate_facility_supply_route(
             city=city,
             selected_cc=pudo_cc,
             used_facilities=used_pudos,
             truck_capacity=parameters["FURGONETA_ELEC"]["capacidad"],
             facility_label="M4/M5",
+            max_route_duration_min=shift_duration_min,
             routing_config=routing_config,
             traffic_profile=traffic_profile,
             time_traffic_provider=time_traffic_provider,
@@ -391,6 +405,9 @@ def simulate_neighborhood(
             walking_capacity=parameters["PUDO_A_PIE"]["capacidad"],
             neighborhood_name=neighborhood_name,
             routing_config=routing_config,
+            max_route_duration_min=shift_duration_min,
+            facility_available_at=pudo_available_at,
+            shift_end=shift_end,
             add_geometry=add_geometry,
             show_progress=show_progress,
         )

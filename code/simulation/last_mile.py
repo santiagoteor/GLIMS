@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
-
+import json
 from code.common.constants import BIKE_PREPARATION_TIME_PER_ROUTE_MIN, WALKING_PREPARATION_TIME_PER_ROUTE_MIN
 from code.common.data_utils import validate_required_columns
 from code.routing.config import RoutingAlgorithmConfig
@@ -107,8 +107,10 @@ def calculate_microhub_last_mile(
     bike_capacity: float,
     neighborhood_name: str,
     routing_config: RoutingAlgorithmConfig,
+    max_route_duration_min: float | None = None,
     facility_available_at: dict[str, datetime] | None = None,
     shift_end: datetime | None = None,
+    performance_rows: list[dict] | None = None,
     add_geometry: bool = False,
     show_progress: bool = False,
 ) -> tuple[float, float, int, float, list[dict]]:
@@ -152,6 +154,31 @@ def calculate_microhub_last_mile(
 
     for microhub_name, customers in groups.items():
 
+        def _m3_profile_callback(record: dict) -> None:
+            if performance_rows is None:
+                return
+
+            detail_payload = dict(record.get("detail") or {})
+            detail_payload.update({
+                "microhub": str(microhub_name),
+                "microhub_customers": int(len(customers)),
+                "microhub_packages": float(customers["Demand"].sum()),
+            })
+
+            performance_rows.append({
+                "city": city,
+                "neighborhood": neighborhood_name,
+                "category": "routing_detail",
+                "model": "M3",
+                "stage": str(record.get("stage", "m3_ils_detail")),
+                "seconds": float(record.get("seconds", 0.0)),
+                "detail": json.dumps(
+                    detail_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            })
+
         plan = router.build_capacity_plan(
             depot_latitude=float(customers["facility_latitude"].iloc[0]),
             depot_longitude=float(customers["facility_longitude"].iloc[0]),
@@ -159,6 +186,7 @@ def calculate_microhub_last_mile(
             transport_mode="cycling",
             vehicle_capacity=bike_capacity,
             client_demands=customers["Demand"].to_numpy(dtype=float),
+            max_route_duration_min=max_route_duration_min,
             route_start_time_per_route_min=BIKE_PREPARATION_TIME_PER_ROUTE_MIN,
             routing_algorithm=routing_config.algorithm,
         cws_allow_route_reversal=routing_config.cws_allow_route_reversal,
@@ -175,6 +203,7 @@ def calculate_microhub_last_mile(
             ils_relocate_neighbor_routes=routing_config.ils_relocate_neighbor_routes,
             ils_relocate_max_insertions=routing_config.ils_relocate_max_insertions,
             ils_random_seed=routing_config.ils_random_seed,
+            profiling_callback=_m3_profile_callback,
             show_progress=show_progress,
         )
 
@@ -256,6 +285,9 @@ def calculate_pudo_last_mile(
     walking_capacity: float,
     neighborhood_name: str,
     routing_config: RoutingAlgorithmConfig,
+    max_route_duration_min: float | None = None,
+    facility_available_at: dict[str, datetime] | None = None,
+    shift_end: datetime | None = None,
     add_geometry: bool = False,
     show_progress: bool = False,
 ) -> tuple[float, float, int, float, int, list[dict]]:
@@ -309,6 +341,7 @@ def calculate_pudo_last_mile(
             transport_mode="walking",
             vehicle_capacity=walking_capacity,
             client_demands=customers["Demand"].to_numpy(dtype=float),
+            max_route_duration_min=max_route_duration_min,
             route_start_time_per_route_min=WALKING_PREPARATION_TIME_PER_ROUTE_MIN,
             routing_algorithm=routing_config.algorithm,
         cws_allow_route_reversal=routing_config.cws_allow_route_reversal,
@@ -335,21 +368,62 @@ def calculate_pudo_last_mile(
             max_route_duration,
             plan.max_route_duration_min,
         )
-        detail_rows.extend(
-            build_route_detail_rows(
-                city=city,
-                neighborhood_name=neighborhood_name,
-                model_code="M4",
-                leg="walking_last_mile",
-                vehicle_type="walking_courier",
-                depot_name=pudo_name,
-                plan=plan,
-                clients=customers,
-                depot_latitude=float(customers["facility_latitude"].iloc[0]),
-                depot_longitude=float(customers["facility_longitude"].iloc[0]),
-                add_geometry=add_geometry,
-            )
+        pudo_rows = build_route_detail_rows(
+            city=city,
+            neighborhood_name=neighborhood_name,
+            model_code="M4",
+            leg="walking_last_mile",
+            vehicle_type="walking_courier",
+            depot_name=pudo_name,
+            plan=plan,
+            clients=customers,
+            depot_latitude=float(customers["facility_latitude"].iloc[0]),
+            depot_longitude=float(customers["facility_longitude"].iloc[0]),
+            add_geometry=add_geometry,
         )
+
+        # Same synchronization rule as M3: the walking operation from a PUDO
+        # can start only once all supply visits required by that PUDO have
+        # completed. Walking is not traffic-adjusted.
+        available_at = (
+            facility_available_at.get(str(pudo_name))
+            if facility_available_at is not None
+            else None
+        )
+
+        if available_at is not None:
+            for row in pudo_rows:
+                route_duration = float(row["duration_min"])
+                route_end = available_at + timedelta(minutes=route_duration)
+
+                preparation = float(row.get("start_handling_min", 0.0))
+                service = float(row.get("stop_service_min", 0.0))
+                base_travel = max(
+                    0.0,
+                    route_duration - preparation - service,
+                )
+
+                row["route_start_datetime"] = available_at.isoformat(
+                    timespec="minutes"
+                )
+                row["route_end_datetime"] = route_end.isoformat(
+                    timespec="minutes"
+                )
+                row["base_travel_time_min"] = base_travel
+                row["time_dependent_travel_time_min"] = base_travel
+                row["traffic_delay_min"] = 0.0
+                row["time_traffic_profile"] = "not_applied"
+                row["simulation_date"] = available_at.date().isoformat()
+                row["shift_start_time"] = available_at.time().isoformat(
+                    timespec="minutes"
+                )
+                if shift_end is not None:
+                    row["shift_end_time"] = shift_end.time().isoformat(
+                        timespec="minutes"
+                    )
+                    row["shift_feasible"] = route_end <= shift_end
+
+        detail_rows.extend(pudo_rows)
 
     return (
         total_distance,

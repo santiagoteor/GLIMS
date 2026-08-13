@@ -102,6 +102,7 @@ class CapacityAwareOsrmRouter:
         ils_relocate_neighbor_routes: int = 5,
         ils_relocate_max_insertions: int = 3,
         ils_random_seed: int | None = 42,
+        profiling_callback=None,
         traffic_profile: TrafficProfile | None = None,
         time_traffic_provider: TimeTrafficProvider | None = None,
         traffic_zone: str | None = None,
@@ -300,6 +301,7 @@ class CapacityAwareOsrmRouter:
                 show_progress=show_progress,
                 cws_allow_route_reversal=cws_allow_route_reversal,
                 return_stats=True,
+                profiling_callback=profiling_callback,
             )
             routing_runtime_seconds = perf_counter() - algorithm_start
             cws_initial_distance_km = float(initial_distance_km)

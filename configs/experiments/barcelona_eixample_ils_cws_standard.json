@@ -36,14 +36,14 @@
     "save_configuration": true,
     "save_metadata": true,
     "save_route_geometry": false,
-    "summary_detail": "compact",
+    "summary_detail": "full",
     "show_progress": true
   },
   "facility_filter": {
     "enabled": true,
     "initial_buffer_m": 500,
     "buffer_increment_m": 500,
-    "maximum_buffer_m": 2000,
+    "maximum_buffer_m": 5000,
     "minimum_candidates": 5
   },
   "facility_assignment": {
