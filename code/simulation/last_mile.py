@@ -1,7 +1,8 @@
+import json
 from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
-import json
+
 from code.common.constants import BIKE_PREPARATION_TIME_PER_ROUTE_MIN, WALKING_PREPARATION_TIME_PER_ROUTE_MIN
 from code.common.data_utils import validate_required_columns
 from code.routing.config import RoutingAlgorithmConfig

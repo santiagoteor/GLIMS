@@ -14,10 +14,13 @@ def _is_route_duration_feasible(
     duration_matrix: np.ndarray | None,
     max_route_duration_min: float | None,
     route_start_time_per_route_min: float,
+    max_last_stop_completion_min: float | None = None,
 ) -> bool:
-    """Return whether one route satisfies the configured duration limit."""
+    """Return whether a route satisfies all configured temporal limits."""
 
-    if duration_matrix is None or max_route_duration_min is None:
+    if duration_matrix is None or not route:
+        return True
+    if max_route_duration_min is None and max_last_stop_completion_min is None:
         return True
 
     route_duration = calculate_route_durations(
@@ -26,7 +29,15 @@ def _is_route_duration_feasible(
         route_start_time_per_route_min=route_start_time_per_route_min,
     )[0]
 
-    return route_duration <= max_route_duration_min
+    if max_route_duration_min is not None and route_duration > max_route_duration_min:
+        return False
+
+    if max_last_stop_completion_min is not None:
+        last_stop_completion = route_duration - float(duration_matrix[route[-1], 0])
+        if last_stop_completion > max_last_stop_completion_min:
+            return False
+
+    return True
 
 
 
@@ -82,6 +93,7 @@ def improve_route_two_opt(
     *,
     duration_matrix: np.ndarray | None = None,
     max_route_duration_min: float | None = None,
+    max_last_stop_completion_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
 ) -> tuple[float, list[int]]:
     """
@@ -137,6 +149,7 @@ def improve_route_two_opt(
                     duration_matrix,
                     max_route_duration_min,
                     route_start_time_per_route_min,
+                    max_last_stop_completion_min,
                 ):
                     continue
 
@@ -162,6 +175,7 @@ def improve_routes_two_opt(
     *,
     duration_matrix: np.ndarray | None = None,
     max_route_duration_min: float | None = None,
+    max_last_stop_completion_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
 ) -> tuple[float, list[list[int]]]:
     """Apply 2-opt independently to every route."""
@@ -174,6 +188,7 @@ def improve_routes_two_opt(
             matrix,
             duration_matrix=duration_matrix,
             max_route_duration_min=max_route_duration_min,
+            max_last_stop_completion_min=max_last_stop_completion_min,
             route_start_time_per_route_min=route_start_time_per_route_min,
         )
         improved_routes.append(improved_route)
@@ -246,6 +261,7 @@ def improve_routes_restricted_relocate(
     max_insertions_per_route: int = 3,
     duration_matrix: np.ndarray | None = None,
     max_route_duration_min: float | None = None,
+    max_last_stop_completion_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
 ) -> tuple[float, list[list[int]], dict[str, float | int]]:
     """
@@ -404,6 +420,7 @@ def improve_routes_restricted_relocate(
                     duration_matrix,
                     max_route_duration_min,
                     route_start_time_per_route_min,
+                    max_last_stop_completion_min,
                 ):
                     continue
 
@@ -412,6 +429,7 @@ def improve_routes_restricted_relocate(
                     duration_matrix,
                     max_route_duration_min,
                     route_start_time_per_route_min,
+                    max_last_stop_completion_min,
                 ):
                     continue
 
@@ -459,6 +477,7 @@ def _local_search(
     relocate_max_insertions: int = 3,
     duration_matrix: np.ndarray | None = None,
     max_route_duration_min: float | None = None,
+    max_last_stop_completion_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
     return_stats: bool = False,
 ):
@@ -475,6 +494,7 @@ def _local_search(
         matrix,
         duration_matrix=duration_matrix,
         max_route_duration_min=max_route_duration_min,
+        max_last_stop_completion_min=max_last_stop_completion_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
     )
     two_opt_seconds = perf_counter() - stage_start
@@ -517,6 +537,7 @@ def _local_search(
                 max_insertions_per_route=relocate_max_insertions,
                 duration_matrix=duration_matrix,
                 max_route_duration_min=max_route_duration_min,
+                max_last_stop_completion_min=max_last_stop_completion_min,
                 route_start_time_per_route_min=route_start_time_per_route_min,
             )
         )
@@ -620,6 +641,7 @@ def reconstruct_routes(
     *,
     duration_matrix: np.ndarray | None = None,
     max_route_duration_min: float | None = None,
+    max_last_stop_completion_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
     cws_allow_route_reversal: bool = False,
     biased_cws_alpha_min: float = 0.05,
@@ -661,6 +683,7 @@ def reconstruct_routes(
         client_demands=sub_demands,
         duration_matrix=sub_duration_matrix,
         max_route_duration_min=max_route_duration_min,
+        max_last_stop_completion_min=max_last_stop_completion_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
         show_progress=show_progress,
         allow_route_reversal=cws_allow_route_reversal,
@@ -691,6 +714,7 @@ def destruction_reconstruction(
     *,
     duration_matrix: np.ndarray | None = None,
     max_route_duration_min: float | None = None,
+    max_last_stop_completion_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
     cws_allow_route_reversal: bool = False,
     biased_cws_alpha_min: float = 0.05,
@@ -708,6 +732,7 @@ def destruction_reconstruction(
         client_demands,
         duration_matrix=duration_matrix,
         max_route_duration_min=max_route_duration_min,
+        max_last_stop_completion_min=max_last_stop_completion_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
         cws_allow_route_reversal=cws_allow_route_reversal,
         biased_cws_alpha_min=biased_cws_alpha_min,
@@ -726,11 +751,13 @@ def iterated_local_search(
     *,
     duration_matrix: np.ndarray | None = None,
     max_route_duration_min: float | None = None,
+    max_last_stop_completion_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
     max_iterations: int = 100,
     max_iterations_without_improvement: int | None = 20,
     destruction_percentage_step: float = 10.0,
     max_destruction_percentage: float = 100.0,
+    max_full_destruction_attempts: int = 2,
     biased_cws_alpha_min: float = 0.05,
     biased_cws_alpha_max: float = 0.25,
     restricted_relocate: bool = True,
@@ -775,6 +802,10 @@ def iterated_local_search(
     if destruction_percentage_step <= 0:
         raise ValueError(
             "destruction_percentage_step must be greater than zero."
+        )
+    if max_full_destruction_attempts <= 0:
+        raise ValueError(
+            "max_full_destruction_attempts must be greater than zero."
         )
 
     biased_cws_alpha_min = float(biased_cws_alpha_min)
@@ -828,6 +859,7 @@ def iterated_local_search(
         client_demands=demands,
         duration_matrix=duration_matrix,
         max_route_duration_min=max_route_duration_min,
+        max_last_stop_completion_min=max_last_stop_completion_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
         show_progress=show_progress,
         allow_route_reversal=cws_allow_route_reversal,
@@ -855,6 +887,7 @@ def iterated_local_search(
         relocate_max_insertions=relocate_max_insertions,
         duration_matrix=duration_matrix,
         max_route_duration_min=max_route_duration_min,
+        max_last_stop_completion_min=max_last_stop_completion_min,
         route_start_time_per_route_min=route_start_time_per_route_min,
         return_stats=True,
     )
@@ -869,6 +902,7 @@ def iterated_local_search(
     best_routes = [route.copy() for route in current_routes]
 
     destruction_percentage = 0.0
+    full_destruction_attempts = 0
     iterations_without_improvement = 0
 
     iteration_progress = tqdm(
@@ -886,6 +920,7 @@ def iterated_local_search(
             destruction_percentage + destruction_percentage_step,
             max_destruction_percentage,
         )
+        attempted_destruction_percentage = destruction_percentage
 
         reconstruction_started = perf_counter()
         remaining_routes, freed_clients = destroy_routes(
@@ -900,6 +935,7 @@ def iterated_local_search(
             demands,
             duration_matrix=duration_matrix,
             max_route_duration_min=max_route_duration_min,
+            max_last_stop_completion_min=max_last_stop_completion_min,
             route_start_time_per_route_min=route_start_time_per_route_min,
             cws_allow_route_reversal=cws_allow_route_reversal,
             biased_cws_alpha_min=biased_cws_alpha_min,
@@ -920,6 +956,7 @@ def iterated_local_search(
             relocate_max_insertions=relocate_max_insertions,
             duration_matrix=duration_matrix,
             max_route_duration_min=max_route_duration_min,
+            max_last_stop_completion_min=max_last_stop_completion_min,
             route_start_time_per_route_min=route_start_time_per_route_min,
             return_stats=True,
         )
@@ -927,11 +964,14 @@ def iterated_local_search(
         base_cost_before_acceptance = current_cost
         accepted = candidate_cost < current_cost - 1e-9
 
+        destruction_cycle_reset = False
+
         if accepted:
             current_cost = candidate_cost
             current_routes = [route.copy() for route in candidate_routes]
 
             destruction_percentage = 0.0
+            full_destruction_attempts = 0
             iterations_without_improvement = 0
 
             if candidate_cost < best_cost - 1e-9:
@@ -939,6 +979,26 @@ def iterated_local_search(
                 best_routes = [route.copy() for route in candidate_routes]
         else:
             iterations_without_improvement += 1
+
+            if (
+                attempted_destruction_percentage
+                >= max_destruction_percentage - 1e-12
+            ):
+                full_destruction_attempts += 1
+
+                if (
+                    full_destruction_attempts
+                    >= max_full_destruction_attempts
+                ):
+                    # Full BR-CWS reconstruction is the most expensive
+                    # neighborhood. After a configurable number of consecutive
+                    # unsuccessful full destructions, restart the destruction
+                    # ladder instead of repeatedly rebuilding 100% of clients.
+                    destruction_percentage = 0.0
+                    full_destruction_attempts = 0
+                    destruction_cycle_reset = True
+            else:
+                full_destruction_attempts = 0
 
         if profiling_callback is not None:
             profiling_callback({
@@ -951,16 +1011,18 @@ def iterated_local_search(
                     "iteration": iterations_completed,
                     "destruction_percentage": float(
                         destruction_percentage
-                        if not accepted
-                        else 0.0
                     ),
                     "destruction_percentage_attempted": float(
-                        min(
-                            destruction_percentage_step
-                            if accepted
-                            else destruction_percentage,
-                            max_destruction_percentage,
-                        )
+                        attempted_destruction_percentage
+                    ),
+                    "full_destruction_attempts": int(
+                        full_destruction_attempts
+                    ),
+                    "max_full_destruction_attempts": int(
+                        max_full_destruction_attempts
+                    ),
+                    "destruction_cycle_reset": bool(
+                        destruction_cycle_reset
                     ),
                     "freed_clients": len(freed_clients),
                     "remaining_routes": len(remaining_routes),
@@ -997,6 +1059,7 @@ def iterated_local_search(
             iteration_progress.set_postfix(
                 best_km=f"{best_cost:.3f}",
                 p=f"{destruction_percentage:.0f}%",
+                full_attempts=full_destruction_attempts,
                 no_improvement=iterations_without_improvement,
             )
 

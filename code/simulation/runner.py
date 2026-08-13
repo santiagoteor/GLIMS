@@ -109,6 +109,16 @@ def simulate_neighborhood(
     if shift_duration_min <= 0:
         raise ValueError("The configured shift duration must be greater than zero.")
 
+    max_last_service_completion_min = None
+    if routing_config.last_service_deadline_enabled:
+        margin_min = float(routing_config.last_service_margin_min)
+        if margin_min < 0 or margin_min >= shift_duration_min:
+            raise ValueError(
+                "last_service_margin_min must be non-negative and smaller "
+                "than the configured shift duration."
+            )
+        max_last_service_completion_min = shift_duration_min - margin_min
+
     def timed_stage(stage: str, category: str, model: str | None = None):
         class _Stage:
             def __enter__(self_inner):
@@ -169,6 +179,7 @@ def simulate_neighborhood(
             vehicle_capacity=parameters["FURGONETA_CONV"]["capacidad"],
             client_demands=client_demands,
             max_route_duration_min=shift_duration_min,
+            max_last_stop_completion_min=max_last_service_completion_min,
             route_start_time_per_route_min=DIRECT_VAN_LOADING_TIME_PER_ROUTE_MIN,
             routing_algorithm=routing_config.algorithm,
             cws_allow_route_reversal=routing_config.cws_allow_route_reversal,
@@ -278,6 +289,7 @@ def simulate_neighborhood(
                 vehicle_capacity=m2_capacity,
                 client_demands=client_demands,
                 max_route_duration_min=shift_duration_min,
+                max_last_stop_completion_min=max_last_service_completion_min,
                 route_start_time_per_route_min=DIRECT_VAN_LOADING_TIME_PER_ROUTE_MIN,
                 routing_algorithm=routing_config.algorithm,
                 cws_allow_route_reversal=routing_config.cws_allow_route_reversal,

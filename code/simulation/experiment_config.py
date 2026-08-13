@@ -16,6 +16,7 @@ class RoutingExperimentConfig:
     ils_max_no_improvement: int | None = 20
     ils_destruction_percentage_step: int = 10
     ils_max_destruction_percentage: int = 100
+    ils_max_full_destruction_attempts: int = 2
     ils_biased_cws_alpha_min: float = 0.05
     ils_biased_cws_alpha_max: float = 0.25
     ils_restricted_relocate: bool = True
@@ -23,6 +24,8 @@ class RoutingExperimentConfig:
     ils_relocate_neighbor_routes: int = 5
     ils_relocate_max_insertions: int = 3
     ils_random_seed: int | None = 42
+    last_service_deadline_enabled: bool = False
+    last_service_margin_min: float = 30.0
 
 
 @dataclass(frozen=True)
@@ -187,6 +190,10 @@ def validate_experiment_config(config: ExperimentConfig) -> None:
         raise ValueError("ils_destruction_percentage_step must be greater than zero.")
     if not (0 < config.routing.ils_max_destruction_percentage <= 100):
         raise ValueError("ils_max_destruction_percentage must be between 0 (exclusive) and 100 (inclusive).")
+    if config.routing.ils_max_full_destruction_attempts <= 0:
+        raise ValueError(
+            "ils_max_full_destruction_attempts must be greater than zero."
+        )
     if not (0 < config.routing.ils_biased_cws_alpha_min < 1):
         raise ValueError("ils_biased_cws_alpha_min must be strictly between 0 and 1.")
     if not (0 < config.routing.ils_biased_cws_alpha_max < 1):
@@ -201,6 +208,18 @@ def validate_experiment_config(config: ExperimentConfig) -> None:
         raise ValueError("ils_relocate_neighbor_routes must be greater than zero.")
     if config.routing.ils_relocate_max_insertions <= 0:
         raise ValueError("ils_relocate_max_insertions must be greater than zero.")
+    if config.routing.last_service_margin_min < 0:
+        raise ValueError("last_service_margin_min cannot be negative.")
+    if (
+        config.routing.last_service_deadline_enabled
+        and config.routing.last_service_margin_min
+        >= config.traffic.shift_duration_min
+    ):
+        raise ValueError(
+            "When supply_arrival_deadline_enabled is true, "
+            "supply_arrival_margin_min must be smaller than "
+            "traffic.shift_duration_min."
+        )
     if config.facility_filter.initial_buffer_m < 0:
         raise ValueError(
             "facility_filter.initial_buffer_m cannot be negative."
@@ -278,6 +297,10 @@ def resolve_experiment_config(
             overrides.get("ils_max_destruction_percentage"),
             base.routing.ils_max_destruction_percentage,
         ),
+        ils_max_full_destruction_attempts=_pick(
+            overrides.get("ils_max_full_destruction_attempts"),
+            base.routing.ils_max_full_destruction_attempts,
+        ),
         ils_biased_cws_alpha_min=_pick(
             overrides.get("ils_biased_cws_alpha_min"),
             base.routing.ils_biased_cws_alpha_min,
@@ -306,6 +329,10 @@ def resolve_experiment_config(
             overrides.get("ils_random_seed"),
             base.routing.ils_random_seed,
         ),
+        last_service_deadline_enabled=(
+            base.routing.last_service_deadline_enabled
+        ),
+        last_service_margin_min=base.routing.last_service_margin_min,
     )
     traffic = TrafficExperimentConfig(
         static_profile=_pick(

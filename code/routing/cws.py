@@ -150,6 +150,7 @@ def clarke_wright_savings(
     *,
     duration_matrix: np.ndarray | None = None,
     max_route_duration_min: float | None = None,
+    max_last_stop_completion_min: float | None = None,
     route_start_time_per_route_min: float = 0.0,
     show_progress: bool = False,
     allow_route_reversal: bool = False,
@@ -232,27 +233,35 @@ def clarke_wright_savings(
             "At least one client demand exceeds the vehicle capacity."
         )
 
+    timing_constraints_enabled = (
+        duration_matrix is not None
+        and (
+            max_route_duration_min is not None
+            or max_last_stop_completion_min is not None
+        )
+    )
     duration_limit_enabled = (
         duration_matrix is not None
         and max_route_duration_min is not None
     )
+    last_stop_deadline_enabled = (
+        duration_matrix is not None
+        and max_last_stop_completion_min is not None
+    )
 
-    if duration_limit_enabled:
+    if timing_constraints_enabled:
         duration_matrix = np.asarray(duration_matrix, dtype=float)
         expected_shape = (n_clients + 1, n_clients + 1)
-
         if duration_matrix.shape != expected_shape:
             raise ValueError(
                 "duration_matrix must have shape "
                 f"{expected_shape}, got {duration_matrix.shape}."
             )
 
+    if duration_limit_enabled:
         max_route_duration_min = float(max_route_duration_min)
-
         if max_route_duration_min <= 0:
-            raise ValueError(
-                "max_route_duration_min must be greater than zero."
-            )
+            raise ValueError("max_route_duration_min must be greater than zero.")
 
         infeasible_clients = [
             client
@@ -265,13 +274,37 @@ def clarke_wright_savings(
                 > max_route_duration_min
             )
         ]
-
         if infeasible_clients:
             raise ValueError(
                 "At least one client cannot be served within the route "
                 f"duration limit of {max_route_duration_min:.0f} minutes, "
                 "even in an independent depot-client-depot route. "
                 f"Client indices: {infeasible_clients}"
+            )
+
+    if last_stop_deadline_enabled:
+        max_last_stop_completion_min = float(max_last_stop_completion_min)
+        if max_last_stop_completion_min <= 0:
+            raise ValueError(
+                "max_last_stop_completion_min must be greater than zero."
+            )
+
+        deadline_infeasible_clients = [
+            client
+            for client in range(1, n_clients + 1)
+            if (
+                route_start_time_per_route_min
+                + duration_matrix[0, client]
+                + SERVICE_TIME_PER_STOP_MIN
+                > max_last_stop_completion_min
+            )
+        ]
+        if deadline_infeasible_clients:
+            raise ValueError(
+                "At least one supply stop cannot be completed before the "
+                "configured facility-arrival cutoff, even when served alone. "
+                f"Cutoff elapsed minutes: {max_last_stop_completion_min:.1f}. "
+                f"Client indices: {deadline_infeasible_clients}"
             )
 
     routes = {
@@ -290,7 +323,7 @@ def clarke_wright_savings(
     # Cache route durations so candidate merges can be checked in O(1)
     # without rescanning the entire merged route.
     route_durations = None
-    if duration_limit_enabled:
+    if timing_constraints_enabled:
         route_durations = {
             client: float(
                 route_start_time_per_route_min
@@ -454,7 +487,7 @@ def clarke_wright_savings(
 
         merged_route = oriented_i + oriented_j
 
-        if duration_limit_enabled:
+        if timing_constraints_enabled:
             merged_duration = float(
                 route_durations[route_i_id]
                 + route_durations[route_j_id]
@@ -464,19 +497,32 @@ def clarke_wright_savings(
                 + duration_matrix[oriented_i[-1], oriented_j[0]]
             )
 
-            if merged_duration > max_route_duration_min:
+            if (
+                duration_limit_enabled
+                and merged_duration > max_route_duration_min
+            ):
                 if register_failed_candidate():
                     break
                 continue
 
+            if last_stop_deadline_enabled:
+                merged_last_stop_completion = (
+                    merged_duration
+                    - float(duration_matrix[oriented_j[-1], 0])
+                )
+                if merged_last_stop_completion > max_last_stop_completion_min:
+                    if register_failed_candidate():
+                        break
+                    continue
+
         routes[route_i_id] = merged_route
         route_loads[route_i_id] = merged_load
-        if duration_limit_enabled:
+        if timing_constraints_enabled:
             route_durations[route_i_id] = merged_duration
 
         del routes[route_j_id]
         del route_loads[route_j_id]
-        if duration_limit_enabled:
+        if timing_constraints_enabled:
             del route_durations[route_j_id]
 
         # Only clients absorbed from route_j need a route-id update.
