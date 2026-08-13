@@ -29,6 +29,53 @@ def _is_route_duration_feasible(
     return route_duration <= max_route_duration_min
 
 
+
+def _directed_two_opt_delta(
+    route: list[int],
+    start_index: int,
+    end_index: int,
+    matrix: np.ndarray,
+    reverse_minus_forward_prefix: np.ndarray,
+) -> float:
+    """Return the exact directed cost delta of one 2-opt reversal in O(1)."""
+    first = route[start_index]
+    last = route[end_index]
+    previous = 0 if start_index == 0 else route[start_index - 1]
+    following = 0 if end_index == len(route) - 1 else route[end_index + 1]
+
+    boundary_delta = (
+        matrix[previous, last]
+        + matrix[first, following]
+        - matrix[previous, first]
+        - matrix[last, following]
+    )
+
+    internal_delta = (
+        reverse_minus_forward_prefix[end_index]
+        - reverse_minus_forward_prefix[start_index]
+    )
+
+    return float(boundary_delta + internal_delta)
+
+
+def _two_opt_reverse_minus_forward_prefix(
+    route: list[int],
+    matrix: np.ndarray,
+) -> np.ndarray:
+    """Prefix of reversed-edge cost minus forward-edge cost."""
+    prefix = np.zeros(len(route), dtype=float)
+    for edge_index in range(len(route) - 1):
+        a = route[edge_index]
+        b = route[edge_index + 1]
+        prefix[edge_index + 1] = (
+            prefix[edge_index]
+            + matrix[b, a]
+            - matrix[a, b]
+        )
+    return prefix
+
+
+
 def improve_route_two_opt(
     route: list[int],
     matrix: np.ndarray,
@@ -38,8 +85,11 @@ def improve_route_two_opt(
     route_start_time_per_route_min: float = 0.0,
 ) -> tuple[float, list[int]]:
     """
-    Improve one depot-based route using best-improvement 2-opt.
-    The depot is implicit and is not included in ``route``.
+    Improve one depot-based route using best-improvement directed 2-opt.
+
+    O(1) directed deltas are used only as a screening step. Any candidate that
+    can plausibly improve the route is still reconstructed and evaluated with
+    the original exact feasibility and cost functions before acceptance.
     """
 
     best_route = route.copy()
@@ -49,14 +99,33 @@ def improve_route_two_opt(
         return best_cost, best_route
 
     improved = True
+    screening_margin = 1e-8
 
     while improved:
         improved = False
         iteration_best_route = best_route
         iteration_best_cost = best_cost
 
+        reverse_minus_forward_prefix = (
+            _two_opt_reverse_minus_forward_prefix(best_route, matrix)
+        )
+
         for start_index in range(len(best_route) - 1):
             for end_index in range(start_index + 1, len(best_route)):
+                estimated_delta = _directed_two_opt_delta(
+                    best_route,
+                    start_index,
+                    end_index,
+                    matrix,
+                    reverse_minus_forward_prefix,
+                )
+                estimated_cost = best_cost + estimated_delta
+
+                # Clearly worse candidates cannot become the best improvement.
+                # Borderline cases still go through exact legacy evaluation.
+                if estimated_cost >= iteration_best_cost + screening_margin:
+                    continue
+
                 candidate_route = (
                     best_route[:start_index]
                     + list(reversed(best_route[start_index:end_index + 1]))
@@ -153,14 +222,17 @@ def _route_proximity_score(
     """
     Directed proximity score used only to shortlist destination routes.
 
-    Both directions are considered because OSRM matrices can be asymmetric.
+    The score definition is unchanged; only the calculation is vectorized.
     """
     if not route:
         return float("inf")
-    return min(
-        float(matrix[client, other] + matrix[other, client])
-        for other in route
+
+    route_indices = np.asarray(route, dtype=np.intp)
+    directed_scores = (
+        matrix[client, route_indices]
+        + matrix[route_indices, client]
     )
+    return float(np.min(directed_scores))
 
 
 def improve_routes_restricted_relocate(
