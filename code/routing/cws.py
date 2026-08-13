@@ -160,6 +160,7 @@ def clarke_wright_savings(
     biased_candidate_window: int = 2048,
     max_failed_candidates_without_merge: int | None = 200_000,
     rng: np.random.Generator | None = None,
+    profiling_callback=None,
 ):
     """
     Build capacity- and duration-feasible routes using parallel Clarke-Wright.
@@ -168,6 +169,9 @@ def clarke_wright_savings(
     Savings generation and sorting are vectorized with numpy; route merging
     remains a sequential pass (it depends on state built incrementally).
     """
+
+    cws_total_start = perf_counter()
+    cws_setup_start = cws_total_start
 
     if biased_randomization:
         biased_alpha_min = float(biased_alpha_min)
@@ -334,6 +338,8 @@ def clarke_wright_savings(
             for client in range(1, n_clients + 1)
         }
 
+    setup_seconds = perf_counter() - cws_setup_start
+
     print(
         f"Generating directed CWS savings for "
         f"{n_clients} clients "
@@ -422,6 +428,12 @@ def clarke_wright_savings(
     successful_merges = 0
     failed_since_last_merge = 0
     termination_reason = "candidate_exhaustion"
+    same_route_rejections = 0
+    endpoint_rejections = 0
+    capacity_rejections = 0
+    route_duration_rejections = 0
+    last_service_deadline_rejections = 0
+    route_id_update_clients = 0
 
     def register_failed_candidate() -> bool:
         nonlocal failed_since_last_merge, termination_reason
@@ -445,6 +457,7 @@ def clarke_wright_savings(
         route_j_id = route_of[j]
 
         if route_i_id == route_j_id:
+            same_route_rejections += 1
             if register_failed_candidate():
                 break
             continue
@@ -458,6 +471,7 @@ def clarke_wright_savings(
             elif route_i[0] == i:
                 oriented_i = list(reversed(route_i))
             else:
+                endpoint_rejections += 1
                 if register_failed_candidate():
                     break
                 continue
@@ -467,11 +481,13 @@ def clarke_wright_savings(
             elif route_j[-1] == j:
                 oriented_j = list(reversed(route_j))
             else:
+                endpoint_rejections += 1
                 if register_failed_candidate():
                     break
                 continue
         else:
             if route_i[-1] != i or route_j[0] != j:
+                endpoint_rejections += 1
                 if register_failed_candidate():
                     break
                 continue
@@ -481,6 +497,7 @@ def clarke_wright_savings(
         merged_load = route_loads[route_i_id] + route_loads[route_j_id]
 
         if merged_load > vehicle_capacity:
+            capacity_rejections += 1
             if register_failed_candidate():
                 break
             continue
@@ -501,6 +518,7 @@ def clarke_wright_savings(
                 duration_limit_enabled
                 and merged_duration > max_route_duration_min
             ):
+                route_duration_rejections += 1
                 if register_failed_candidate():
                     break
                 continue
@@ -511,6 +529,7 @@ def clarke_wright_savings(
                     - float(duration_matrix[oriented_j[-1], 0])
                 )
                 if merged_last_stop_completion > max_last_stop_completion_min:
+                    last_service_deadline_rejections += 1
                     if register_failed_candidate():
                         break
                     continue
@@ -528,6 +547,7 @@ def clarke_wright_savings(
         # Only clients absorbed from route_j need a route-id update.
         for client in oriented_j:
             route_of[client] = route_i_id
+        route_id_update_clients += len(oriented_j)
 
         successful_merges += 1
         failed_since_last_merge = 0
@@ -551,4 +571,41 @@ def clarke_wright_savings(
         f"successful merges: {successful_merges:,} | "
         f"termination: {termination_reason}."
     )
+
+    if profiling_callback is not None:
+        total_seconds = perf_counter() - cws_total_start
+        profiling_callback({
+            "stage": "m3_brcws_internal" if biased_randomization else "m3_cws_internal",
+            "seconds": float(total_seconds),
+            "detail": {
+                "biased_randomization": bool(biased_randomization),
+                "clients": int(n_clients),
+                "candidate_pairs": int(n_clients * (n_clients - 1)),
+                "finite_savings": int(len(flat_savings)),
+                "setup_seconds": float(setup_seconds),
+                "savings_generation_seconds": float(savings_generation_seconds),
+                "sorting_seconds": float(sorting_seconds),
+                "merging_seconds": float(merging_seconds),
+                "processed_candidates": int(processed_candidates),
+                "successful_merges": int(successful_merges),
+                "same_route_rejections": int(same_route_rejections),
+                "endpoint_rejections": int(endpoint_rejections),
+                "capacity_rejections": int(capacity_rejections),
+                "route_duration_rejections": int(route_duration_rejections),
+                "last_service_deadline_rejections": int(last_service_deadline_rejections),
+                "route_id_update_clients": int(route_id_update_clients),
+                "failed_since_last_merge_at_end": int(failed_since_last_merge),
+                "termination_reason": str(termination_reason),
+                "initial_routes": int(n_clients),
+                "final_routes": int(len(final_routes)),
+                "lower_bound_routes": int(lower_bound_routes),
+                "candidate_window": int(biased_candidate_window) if biased_randomization else None,
+                "max_failed_candidates_without_merge": (
+                    int(max_failed_candidates_without_merge)
+                    if biased_randomization and max_failed_candidates_without_merge is not None
+                    else None
+                ),
+            },
+        })
+
     return total_cost, final_routes
