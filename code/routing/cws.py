@@ -287,6 +287,20 @@ def clarke_wright_savings(
         for client in range(1, n_clients + 1)
     }
 
+    # Cache route durations so candidate merges can be checked in O(1)
+    # without rescanning the entire merged route.
+    route_durations = None
+    if duration_limit_enabled:
+        route_durations = {
+            client: float(
+                route_start_time_per_route_min
+                + duration_matrix[0, client]
+                + duration_matrix[client, 0]
+                + SERVICE_TIME_PER_STOP_MIN
+            )
+            for client in range(1, n_clients + 1)
+        }
+
     print(
         f"Generating directed CWS savings for "
         f"{n_clients} clients "
@@ -441,11 +455,14 @@ def clarke_wright_savings(
         merged_route = oriented_i + oriented_j
 
         if duration_limit_enabled:
-            merged_duration = calculate_route_durations(
-                duration_matrix,
-                [merged_route],
-                route_start_time_per_route_min=route_start_time_per_route_min,
-            )[0]
+            merged_duration = float(
+                route_durations[route_i_id]
+                + route_durations[route_j_id]
+                - route_start_time_per_route_min
+                - duration_matrix[oriented_i[-1], 0]
+                - duration_matrix[0, oriented_j[0]]
+                + duration_matrix[oriented_i[-1], oriented_j[0]]
+            )
 
             if merged_duration > max_route_duration_min:
                 if register_failed_candidate():
@@ -454,11 +471,16 @@ def clarke_wright_savings(
 
         routes[route_i_id] = merged_route
         route_loads[route_i_id] = merged_load
+        if duration_limit_enabled:
+            route_durations[route_i_id] = merged_duration
 
         del routes[route_j_id]
         del route_loads[route_j_id]
+        if duration_limit_enabled:
+            del route_durations[route_j_id]
 
-        for client in merged_route:
+        # Only clients absorbed from route_j need a route-id update.
+        for client in oriented_j:
             route_of[client] = route_i_id
 
         successful_merges += 1
