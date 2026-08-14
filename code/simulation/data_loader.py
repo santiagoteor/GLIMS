@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pandas as pd
 
 from code.common.data_utils import validate_required_columns
@@ -94,6 +96,34 @@ def load_classified_locations(city: str) -> pd.DataFrame:
     return classified_locations
 
 
+
+def resolve_demand_instance_path(
+    city: str,
+    scenario: str,
+    instance_size: int,
+    *,
+    demand_seed: int | None = None,
+    demand_instance_id: str | None = None,
+) -> Path:
+    """Return the exact demand CSV selected by the experiment config."""
+
+    demand_folder = RESULTS_DIR / city / "demand"
+
+    if demand_instance_id is not None:
+        filename = str(demand_instance_id)
+        if not filename.lower().endswith(".csv"):
+            filename += ".csv"
+        return demand_folder / filename
+
+    if demand_seed is not None:
+        return (
+            demand_folder
+            / f"demand_{scenario}_{instance_size}_seed_{int(demand_seed)}.csv"
+        )
+
+    return demand_folder / f"demand_{scenario}_{instance_size}.csv"
+
+
 def load_demand_instance(
     city: str,
     scenario: str,
@@ -109,19 +139,13 @@ def load_demand_instance(
     ``demand_<scenario>_<size>.csv`` filename is used.
     """
 
-    demand_folder = RESULTS_DIR / city / "demand"
-    if demand_instance_id is not None:
-        filename = str(demand_instance_id)
-        if not filename.lower().endswith(".csv"):
-            filename += ".csv"
-        demand_path = demand_folder / filename
-    elif demand_seed is not None:
-        demand_path = (
-            demand_folder
-            / f"demand_{scenario}_{instance_size}_seed_{int(demand_seed)}.csv"
-        )
-    else:
-        demand_path = demand_folder / f"demand_{scenario}_{instance_size}.csv"
+    demand_path = resolve_demand_instance_path(
+        city,
+        scenario,
+        instance_size,
+        demand_seed=demand_seed,
+        demand_instance_id=demand_instance_id,
+    )
 
     if not demand_path.exists():
         raise FileNotFoundError(

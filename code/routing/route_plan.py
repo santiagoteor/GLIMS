@@ -48,6 +48,12 @@ class OsrmRoutePlan:
     route_adjusted_travel_times_min: list[float] = field(default_factory=list)
     route_traffic_delays_min: list[float] = field(default_factory=list)
     route_shift_feasible: list[bool] = field(default_factory=list)
+    route_stop_arrival_offsets_min: list[list[float]] = field(
+        default_factory=list
+    )
+    route_stop_service_end_offsets_min: list[list[float]] = field(
+        default_factory=list
+    )
 
     @property
     def route_count(self) -> int:

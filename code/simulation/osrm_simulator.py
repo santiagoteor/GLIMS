@@ -27,10 +27,18 @@ from code.simulation.experiment_config import (
 from code.simulation.experiment_output import (
     build_metadata,
     create_experiment_directory,
+    hash_payload,
     save_json,
     slugify,
 )
+from code.simulation.data_loader import resolve_demand_instance_path
 from code.simulation.facility_filter import FacilityFilterSettings
+from code.simulation.exporters import (
+    build_facility_summary_frame,
+    build_route_stops_frame,
+    build_routing_plan_metrics_frame,
+    strip_route_export_columns,
+)
 from code.simulation.runner import simulate_city
 from code.simulation.summary_report import build_summary_export
 from code.simulation.traffic import load_traffic_profile
@@ -257,6 +265,44 @@ def main() -> None:
         )
 
 
+
+SUMMARY_AUDIT_OUTPUTS = {
+    "routing_integrity_summary",
+    "route_customer_summary",
+    "unroutable_customers",
+}
+
+
+def _select_audit_outputs(
+    audit_details: dict[str, pd.DataFrame],
+    *,
+    audit_detail: str,
+    performance_profile: str,
+) -> dict[str, pd.DataFrame]:
+    """Select persisted audit/profiling outputs by verbosity."""
+
+    selected: dict[str, pd.DataFrame] = {}
+
+    for audit_name, audit_df in audit_details.items():
+        if audit_name == "performance_profile":
+            if performance_profile == "off":
+                continue
+            if (
+                performance_profile == "basic"
+                and "category" in audit_df.columns
+            ):
+                audit_df = audit_df.loc[
+                    ~audit_df["category"].eq("routing_detail")
+                ].copy()
+            selected[audit_name] = audit_df
+            continue
+
+        if audit_detail == "full" or audit_name in SUMMARY_AUDIT_OUTPUTS:
+            selected[audit_name] = audit_df
+
+    return selected
+
+
 def _run_city_experiment(
     *,
     config: ExperimentConfig,
@@ -276,6 +322,17 @@ def _run_city_experiment(
     )
     metadata_path = experiment_folder / "metadata.json"
 
+    provenance_config = config.to_dict()
+    provenance_config["resolved_city"] = active_city
+    config_hash = hash_payload(provenance_config)
+    demand_file = resolve_demand_instance_path(
+        active_city,
+        config.demand_scenario,
+        config.instance_size,
+        demand_seed=config.demand_seed,
+        demand_instance_id=config.demand_instance_id,
+    )
+
     if config.output.save_configuration:
         resolved_config = config.to_dict()
         resolved_config["resolved_city"] = active_city
@@ -290,6 +347,8 @@ def _run_city_experiment(
                 started_at=started_at,
                 finished_at=None,
                 status="running",
+                config_hash=config_hash,
+                demand_file=demand_file,
             ),
         )
 
@@ -386,6 +445,12 @@ def _run_city_experiment(
                 ),
                 shift_start=shift_start,
                 shift_end=shift_end,
+                last_service_deadline_enabled=(
+                    routing_config.last_service_deadline_enabled
+                ),
+                last_service_margin_min=(
+                    routing_config.last_service_margin_min
+                ),
             )
 
         def _save_completed_neighborhood(
@@ -402,9 +467,13 @@ def _run_city_experiment(
             zone_slug = slugify(str(neighborhood_name))
             zone_folder = neighborhoods_folder / zone_slug
             routes_folder = zone_folder / "routes"
+            routing_folder = zone_folder / "routing"
+            facilities_folder = zone_folder / "facilities"
             audit_folder = zone_folder / "audit"
 
             routes_folder.mkdir(parents=True, exist_ok=True)
+            routing_folder.mkdir(parents=True, exist_ok=True)
+            facilities_folder.mkdir(parents=True, exist_ok=True)
             audit_folder.mkdir(parents=True, exist_ok=True)
 
             zone_summary = _enrich_summary(results, model_details)
@@ -415,6 +484,42 @@ def _run_city_experiment(
             )
 
             if config.output.save_route_details:
+                if config.output.save_route_stops:
+                    route_stops = build_route_stops_frame(model_details)
+                    if not route_stops.empty:
+                        route_stops.assign(
+                            experiment_id=experiment_id,
+                        ).to_csv(
+                            routes_folder / "route_stops.csv",
+                            index=False,
+                            encoding="utf-8-sig",
+                        )
+
+                facility_summary = build_facility_summary_frame(
+                    model_details
+                )
+                if not facility_summary.empty:
+                    facility_summary.assign(
+                        experiment_id=experiment_id,
+                    ).to_csv(
+                        facilities_folder / "facility_summary.csv",
+                        index=False,
+                        encoding="utf-8-sig",
+                    )
+
+                routing_metrics = build_routing_plan_metrics_frame(
+                    model_details
+                )
+                if not routing_metrics.empty:
+                    routing_metrics.assign(
+                        experiment_id=experiment_id,
+                        selected_traffic_profile=traffic_profile.name,
+                    ).to_csv(
+                        routing_folder / "routing_plan_metrics.csv",
+                        index=False,
+                        encoding="utf-8-sig",
+                    )
+
                 for model_code, detail_df in model_details.items():
                     enriched = detail_df.assign(
                         experiment_id=experiment_id,
@@ -424,13 +529,18 @@ def _run_city_experiment(
                         ),
                         selected_traffic_profile=traffic_profile.name,
                     )
-                    enriched.to_csv(
+                    strip_route_export_columns(enriched).to_csv(
                         routes_folder / f"{model_code.lower()}_routes.csv",
                         index=False,
                         encoding="utf-8-sig",
                     )
 
-            for audit_name, audit_df in audit_details.items():
+            selected_audits = _select_audit_outputs(
+                audit_details,
+                audit_detail=config.output.audit_detail,
+                performance_profile=config.output.performance_profile,
+            )
+            for audit_name, audit_df in selected_audits.items():
                 enriched_audit = audit_df.assign(
                     experiment_id=experiment_id,
                     routing_algorithm=routing_config.algorithm,
@@ -449,6 +559,8 @@ def _run_city_experiment(
                         started_at=started,
                         finished_at=finished,
                         status="completed",
+                        config_hash=config_hash,
+                        demand_file=demand_file,
                     ),
                 )
 
@@ -491,6 +603,8 @@ def _run_city_experiment(
                         finished_at=finished,
                         status="failed",
                         error=f"{type(error).__name__}: {error}",
+                        config_hash=config_hash,
+                        demand_file=demand_file,
                     ),
                 )
 
@@ -556,6 +670,68 @@ def _run_city_experiment(
 
         if config.output.save_route_details:
             routes_folder = experiment_folder / "routes"
+            routing_folder = experiment_folder / "routing"
+            facilities_folder = experiment_folder / "facilities"
+
+            if config.output.save_route_stops:
+                route_stops = build_route_stops_frame(
+                    model_detail_frames
+                )
+                if not route_stops.empty:
+                    route_stops_path = (
+                        routes_folder / "route_stops.csv"
+                    )
+                    route_stops.assign(
+                        experiment_id=experiment_id,
+                    ).to_csv(
+                        route_stops_path,
+                        index=False,
+                        encoding="utf-8-sig",
+                    )
+                    print(
+                        "Route stop details saved to: "
+                        f"{route_stops_path.resolve()}"
+                    )
+
+            facility_summary = build_facility_summary_frame(
+                model_detail_frames
+            )
+            if not facility_summary.empty:
+                facility_summary_path = (
+                    facilities_folder / "facility_summary.csv"
+                )
+                facility_summary.assign(
+                    experiment_id=experiment_id,
+                ).to_csv(
+                    facility_summary_path,
+                    index=False,
+                    encoding="utf-8-sig",
+                )
+                print(
+                    "Facility summary saved to: "
+                    f"{facility_summary_path.resolve()}"
+                )
+
+            routing_metrics = build_routing_plan_metrics_frame(
+                model_detail_frames
+            )
+            if not routing_metrics.empty:
+                routing_metrics_path = (
+                    routing_folder / "routing_plan_metrics.csv"
+                )
+                routing_metrics.assign(
+                    experiment_id=experiment_id,
+                    selected_traffic_profile=traffic_profile.name,
+                ).to_csv(
+                    routing_metrics_path,
+                    index=False,
+                    encoding="utf-8-sig",
+                )
+                print(
+                    "Routing plan metrics saved to: "
+                    f"{routing_metrics_path.resolve()}"
+                )
+
             for model_code, detail_df in model_detail_frames.items():
                 detail_df = detail_df.assign(
                     experiment_id=experiment_id,
@@ -566,7 +742,7 @@ def _run_city_experiment(
                 detail_path = (
                     routes_folder / f"{model_code.lower()}_routes.csv"
                 )
-                detail_df.to_csv(
+                strip_route_export_columns(detail_df).to_csv(
                     detail_path,
                     index=False,
                     encoding="utf-8-sig",
@@ -576,10 +752,35 @@ def _run_city_experiment(
                     f"{detail_path.resolve()}"
                 )
 
+        if config.output.save_route_stops:
+            completed_zones = [
+                row
+                for row in neighborhood_status_rows
+                if row.get("status") == "completed"
+            ]
+            if len(completed_zones) == 1:
+                nested_route_stops = (
+                    experiment_folder
+                    / completed_zones[0]["folder"]
+                    / "routes"
+                    / "route_stops.csv"
+                )
+                if nested_route_stops.exists():
+                    nested_route_stops.unlink()
+                    print(
+                        "Removed duplicate single-zone route_stops.csv "
+                        f"from: {nested_route_stops.parent.resolve()}"
+                    )
+
         audit_folder = experiment_folder / "audit"
         audit_folder.mkdir(parents=True, exist_ok=True)
 
-        for audit_name, audit_df in audit_frames.items():
+        selected_audits = _select_audit_outputs(
+            audit_frames,
+            audit_detail=config.output.audit_detail,
+            performance_profile=config.output.performance_profile,
+        )
+        for audit_name, audit_df in selected_audits.items():
             audit_df = audit_df.assign(
                 experiment_id=experiment_id,
                 routing_algorithm=routing_config.algorithm,
@@ -627,6 +828,8 @@ def _run_city_experiment(
                         if failed_zone_count
                         else None
                     ),
+                    config_hash=config_hash,
+                    demand_file=demand_file,
                 ),
             )
         print(
@@ -644,6 +847,8 @@ def _run_city_experiment(
                     finished_at=finished_at,
                     status="failed",
                     error=f"{type(exc).__name__}: {exc}",
+                    config_hash=config_hash,
+                    demand_file=demand_file,
                 ),
             )
         raise

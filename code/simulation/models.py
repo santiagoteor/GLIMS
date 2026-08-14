@@ -29,6 +29,12 @@ def _build_result(
     co2_kg: float,
     nox_kg: float,
     costs: CostBreakdown,
+    direct_km: float = 0.0,
+    direct_trip_count: int = 0,
+    supply_km: float = 0.0,
+    supply_trip_count: int = 0,
+    last_mile_km: float = 0.0,
+    last_mile_trip_count: int = 0,
 ):
     """Build one result row with a common, auditable cost breakdown."""
 
@@ -68,10 +74,25 @@ def _build_result(
         "paquetes": package_count,
         "km_recorridos": total_km,
         "numero_viajes": trip_count,
+        "direct_km": float(direct_km),
+        "direct_trip_count": int(direct_trip_count),
+        "supply_km": float(supply_km),
+        "supply_trip_count": int(supply_trip_count),
+        "last_mile_km": float(last_mile_km),
+        "last_mile_trip_count": int(last_mile_trip_count),
         "emisiones_co2_kg": co2_kg,
         "emisiones_nox_kg": nox_kg,
         "costo_operacion_ruta_eur": costs.route_operating_cost,
         "costo_servicio_facility_eur": costs.facility_service_cost,
+        "costo_distancia_eur": costs.route_distance_cost,
+        "costo_laboral_eur": costs.route_labor_cost,
+        "costo_facility_fijo_eur": costs.facility_fixed_cost,
+        "costo_almacen_fijo_eur": costs.warehouse_fixed_cost,
+        "costo_manipulacion_eur": costs.warehouse_handling_cost,
+        "costo_vehiculo_fijo_eur": costs.vehicle_fixed_cost,
+        "costo_capex_eur": costs.capital_allocation_cost,
+        "costo_tiempo_cliente_eur": costs.customer_time_cost,
+        "costo_carbono_eur": costs.carbon_cost,
         "otros_costos_eur": (
             costs.facility_fixed_cost
             + costs.warehouse_fixed_cost
@@ -85,6 +106,21 @@ def _build_result(
         "costo_por_paquete_eur": (
             costs.total_cost / package_count
             if package_count > 0
+            else 0.0
+        ),
+        "co2_kg_por_paquete": (
+            float(co2_kg) / package_count
+            if package_count > 0
+            else 0.0
+        ),
+        "nox_g_por_paquete": (
+            float(nox_kg) * 1000.0 / package_count
+            if package_count > 0
+            else 0.0
+        ),
+        "co2_kg_por_km": (
+            float(co2_kg) / float(total_km)
+            if float(total_km) > 0
             else 0.0
         ),
     }
@@ -179,6 +215,8 @@ def simulate_m1(
         co2_kg=co2_kg,
         nox_kg=nox_kg,
         costs=costs,
+        direct_km=route_plan.total_distance_km,
+        direct_trip_count=route_plan.route_count,
     )
 
 
@@ -252,6 +290,8 @@ def simulate_m2(
         co2_kg=co2_kg,
         nox_kg=nox_kg,
         costs=costs,
+        direct_km=route_plan.total_distance_km,
+        direct_trip_count=route_plan.route_count,
     )
 
 
@@ -376,6 +416,10 @@ def simulate_m3(
         co2_kg=supply_co2,
         nox_kg=nox_kg,
         costs=costs,
+        supply_km=supply_plan.total_distance_km,
+        supply_trip_count=supply_plan.route_count,
+        last_mile_km=bike_distance_km,
+        last_mile_trip_count=bike_route_count,
     )
 
 
@@ -503,6 +547,10 @@ def simulate_m4(
         co2_kg=supply_co2,
         nox_kg=nox_kg,
         costs=costs,
+        supply_km=supply_plan.total_distance_km,
+        supply_trip_count=supply_plan.route_count,
+        last_mile_km=walking_distance_km,
+        last_mile_trip_count=walking_route_count,
     )
 
 
@@ -600,4 +648,8 @@ def simulate_m5(
         co2_kg=co2_kg,
         nox_kg=nox_kg,
         costs=costs,
+        supply_km=supply_plan.total_distance_km,
+        supply_trip_count=supply_plan.route_count,
+        last_mile_km=customer_travel_km,
+        last_mile_trip_count=customer_count,
     )

@@ -5,6 +5,8 @@ from typing import Mapping
 
 import pandas as pd
 
+from code.simulation.exporters import build_route_stops_frame
+
 
 COMPACT_COLUMNS = [
     "ciudad",
@@ -33,10 +35,31 @@ COMPACT_COLUMNS = [
 ]
 
 FULL_EXTRA_COLUMNS = [
-    "punto_ultima_milla",
-    "latitud_punto_ultima_milla",
-    "longitud_punto_ultima_milla",
-    "estrategia_punto_ultima_milla",
+    "costo_distancia_eur",
+    "costo_laboral_eur",
+    "costo_facility_fijo_eur",
+    "costo_almacen_fijo_eur",
+    "costo_manipulacion_eur",
+    "costo_vehiculo_fijo_eur",
+    "costo_capex_eur",
+    "costo_tiempo_cliente_eur",
+    "costo_carbono_eur",
+    "co2_kg_por_paquete",
+    "nox_g_por_paquete",
+    "co2_kg_por_km",
+    "direct_km",
+    "direct_trip_count",
+    "supply_km",
+    "supply_trip_count",
+    "last_mile_km",
+    "last_mile_trip_count",
+    "latest_last_service_time",
+    "shift_feasible",
+    "last_service_deadline_enabled",
+    "last_service_margin_min",
+    "last_service_cutoff_time",
+    "services_after_deadline",
+    "last_service_deadline_feasible",
     "demand_scenario",
     "demand_instance_size",
     "demand_instance_id",
@@ -136,6 +159,100 @@ def _timeline_metrics(
     }
 
 
+
+def _last_service_metrics(
+    detail_frame: pd.DataFrame | None,
+    *,
+    model_code: str,
+    shift_end: datetime,
+    deadline_enabled: bool,
+    margin_min: float,
+) -> dict:
+    """Summarize the last controlled service for the configured deadline."""
+
+    empty = {
+        "latest_last_service_time": pd.NA,
+        "shift_feasible": pd.NA,
+        "last_service_deadline_enabled": bool(deadline_enabled),
+        "last_service_margin_min": float(margin_min),
+        "last_service_cutoff_time": pd.NA,
+        "services_after_deadline": pd.NA,
+        "last_service_deadline_feasible": pd.NA,
+    }
+
+    if detail_frame is None or detail_frame.empty:
+        return empty
+
+    if model_code in {"M1", "M2"}:
+        deadline_leg = "direct_delivery"
+    elif model_code in {"M3", "M4", "M5"}:
+        deadline_leg = "facility_supply"
+    else:
+        return empty
+
+    relevant = detail_frame.loc[
+        detail_frame["leg"].eq(deadline_leg)
+    ].copy()
+    if relevant.empty:
+        return empty
+
+    stop_frame = build_route_stops_frame(
+        {model_code: relevant}
+    )
+    if stop_frame.empty:
+        return empty
+
+    service_ends = pd.to_datetime(
+        stop_frame["service_end_datetime"].replace("", pd.NA),
+        errors="coerce",
+    )
+    latest = (
+        service_ends.max()
+        if service_ends.notna().any()
+        else pd.NaT
+    )
+
+    cutoff = shift_end - pd.Timedelta(minutes=float(margin_min))
+
+    if deadline_enabled:
+        after_deadline = int(
+            (service_ends.dropna() > cutoff).sum()
+        )
+        deadline_feasible = after_deadline == 0
+        cutoff_text = cutoff.isoformat(timespec="minutes")
+    else:
+        after_deadline = pd.NA
+        deadline_feasible = pd.NA
+        cutoff_text = pd.NA
+
+    route_ends = _parse_datetime_series(
+        relevant["route_end_datetime"]
+        if "route_end_datetime" in relevant.columns
+        else pd.Series(dtype="object")
+    )
+    shift_feasible = (
+        bool((route_ends.dropna() <= shift_end).all())
+        if len(route_ends.dropna()) == len(relevant)
+        and len(relevant) > 0
+        else pd.NA
+    )
+
+    return {
+        "latest_last_service_time": (
+            latest.isoformat(timespec="minutes")
+            if pd.notna(latest)
+            else pd.NA
+        ),
+        "shift_feasible": shift_feasible,
+        "last_service_deadline_enabled": bool(deadline_enabled),
+        "last_service_margin_min": float(margin_min),
+        "last_service_cutoff_time": cutoff_text,
+        "services_after_deadline": after_deadline,
+        "last_service_deadline_feasible": deadline_feasible,
+    }
+
+
+
 def build_summary_export(
     frame: pd.DataFrame,
     *,
@@ -154,6 +271,8 @@ def build_summary_export(
     traffic_city_file: str,
     shift_start: datetime,
     shift_end: datetime,
+    last_service_deadline_enabled: bool,
+    last_service_margin_min: float,
 ) -> pd.DataFrame:
     output = frame.copy()
 
@@ -197,6 +316,16 @@ def build_summary_export(
             shift_end=shift_end,
         )
         for key, value in metrics.items():
+            output.at[row_index, key] = value
+
+        last_service_metrics = _last_service_metrics(
+            detail,
+            model_code=model_code,
+            shift_end=shift_end,
+            deadline_enabled=last_service_deadline_enabled,
+            margin_min=last_service_margin_min,
+        )
+        for key, value in last_service_metrics.items():
             output.at[row_index, key] = value
 
     detail = summary_detail.strip().lower()

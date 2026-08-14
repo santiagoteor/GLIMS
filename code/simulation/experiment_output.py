@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
 import json
 import platform
 from pathlib import Path
@@ -35,6 +36,8 @@ def create_experiment_directory(
     )
     folder = results_root / "experiments" / slugify(city) / experiment_id
     (folder / "routes").mkdir(parents=True, exist_ok=False)
+    (folder / "routing").mkdir(parents=True, exist_ok=False)
+    (folder / "facilities").mkdir(parents=True, exist_ok=False)
     return experiment_id, folder
 
 
@@ -51,6 +54,8 @@ def build_metadata(
     finished_at: datetime | None,
     status: str,
     error: str | None = None,
+    config_hash: str | None = None,
+    demand_file: Path | None = None,
 ) -> dict[str, Any]:
     metadata: dict[str, Any] = {
         "experiment_id": experiment_id,
@@ -69,6 +74,16 @@ def build_metadata(
         "git_commit": _git_value(["rev-parse", "HEAD"]),
         "git_branch": _git_value(
             ["rev-parse", "--abbrev-ref", "HEAD"]
+        ),
+        "dirty_worktree": _git_dirty_worktree(),
+        "config_hash": config_hash,
+        "demand_source_file": (
+            demand_file.name if demand_file is not None else None
+        ),
+        "demand_file_hash": (
+            hash_file(demand_file)
+            if demand_file is not None and demand_file.exists()
+            else None
         ),
         "python_version": platform.python_version(),
         "platform": platform.platform(),
@@ -97,3 +112,45 @@ def _git_value(arguments: list[str]) -> str | None:
         return None
     value = completed.stdout.strip()
     return value or None
+
+
+def hash_payload(payload: dict[str, Any]) -> str:
+    """Return SHA-256 for a canonical JSON payload."""
+
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def hash_file(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+    """Return SHA-256 for exact file bytes."""
+
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        while True:
+            chunk = file.read(chunk_size)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _git_dirty_worktree() -> bool | None:
+    """Return True when Git reports tracked or untracked changes."""
+
+    try:
+        completed = subprocess.run(
+            ["git", "status", "--porcelain"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+    return bool(completed.stdout.strip())
