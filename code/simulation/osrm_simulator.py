@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -183,6 +184,39 @@ def main() -> None:
         base=base_config,
         overrides=vars(args),
     )
+
+    seed_value = config.routing.ils_random_seed
+    if isinstance(seed_value, list):
+        if config.routing.algorithm != "ils":
+            raise SystemExit(
+                "Error: a list of ils_random_seed values can only be used "
+                "when routing.algorithm is 'ils'."
+            )
+
+        print(
+            "Running independent ILS experiments for seeds: "
+            + ", ".join(str(seed) for seed in seed_value)
+        )
+        total = len(seed_value)
+        for index, seed in enumerate(seed_value, start=1):
+            print(
+                f"\n===== ILS seed {seed} ({index}/{total}) ====="
+            )
+            seed_config = replace(
+                config,
+                routing=replace(
+                    config.routing,
+                    ils_random_seed=seed,
+                ),
+            )
+            _run_resolved_config(seed_config)
+        return
+
+    _run_resolved_config(config)
+
+
+def _run_resolved_config(config: ExperimentConfig) -> None:
+    """Run one experiment with one concrete ILS seed."""
 
     configure_osrm_matrix_cache(
         enabled=config.osrm_cache.enabled,
