@@ -79,7 +79,7 @@ class ExperimentConfig:
     zones: list[str] | None = None
     demand_scenario: str = "medium"
     instance_size: int = 100
-    demand_seed: int | None = None
+    demand_seed: int | list[int] | None = None
     demand_instance_id: str | None = None
     osrm_profile: str = "driving"
     routing: RoutingExperimentConfig = field(
@@ -125,10 +125,9 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         zones=_normalize_zones(raw.get("zones")),
         demand_scenario=str(raw.get("demand_scenario", "medium")),
         instance_size=int(raw.get("instance_size", 100)),
-        demand_seed=(
-            int(raw["demand_seed"])
-            if raw.get("demand_seed") is not None
-            else None
+        demand_seed=_normalize_seed_value(
+            raw.get("demand_seed"),
+            field_name="demand_seed",
         ),
         demand_instance_id=(
             str(raw["demand_instance_id"])
@@ -190,7 +189,33 @@ def validate_experiment_config(config: ExperimentConfig) -> None:
             raise ValueError(
                 "demand_instance_id must be a filename/stem, not a path."
             )
-    if config.demand_seed is not None and config.demand_instance_id is not None:
+    demand_seed = config.demand_seed
+    if isinstance(demand_seed, list):
+        if not demand_seed:
+            raise ValueError("demand_seed list cannot be empty.")
+        if any(
+            isinstance(seed, bool) or not isinstance(seed, int)
+            for seed in demand_seed
+        ):
+            raise ValueError(
+                "Every value in demand_seed must be an integer."
+            )
+        if len(set(demand_seed)) != len(demand_seed):
+            raise ValueError(
+                "demand_seed cannot contain duplicate seeds."
+            )
+    elif (
+        demand_seed is not None
+        and (
+            isinstance(demand_seed, bool)
+            or not isinstance(demand_seed, int)
+        )
+    ):
+        raise ValueError(
+            "demand_seed must be an integer, a list of integers, or null."
+        )
+
+    if demand_seed is not None and config.demand_instance_id is not None:
         raise ValueError(
             "Use either demand_seed or demand_instance_id, not both. "
             "demand_instance_id is intended for explicit file selection."
@@ -248,6 +273,12 @@ def validate_experiment_config(config: ExperimentConfig) -> None:
         raise ValueError(
             "ils_random_seed must be an integer, a list of integers, or null."
         )
+    if isinstance(demand_seed, list) and isinstance(ils_seed, list):
+        if len(demand_seed) != len(ils_seed):
+            raise ValueError(
+                "When demand_seed and ils_random_seed are both lists, "
+                "they must have the same length for 1:1 pairing."
+            )
     if config.routing.last_service_margin_min < 0:
         raise ValueError("last_service_margin_min cannot be negative.")
     if (
@@ -460,6 +491,44 @@ def default_experiment_config() -> ExperimentConfig:
 def _pick(value: Any, fallback: Any) -> Any:
     return fallback if value is None else value
 
+
+
+def _normalize_seed_value(
+    value: Any,
+    *,
+    field_name: str,
+) -> int | list[int] | None:
+    """Normalize a JSON seed value while preserving scalar/list semantics."""
+
+    if value is None:
+        return None
+
+    if isinstance(value, bool):
+        raise ValueError(
+            f"{field_name} must be an integer, a list of integers, or null."
+        )
+
+    if isinstance(value, list):
+        normalized = []
+        for seed in value:
+            if isinstance(seed, bool):
+                raise ValueError(
+                    f"Every value in {field_name} must be an integer."
+                )
+            try:
+                normalized.append(int(seed))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Every value in {field_name} must be an integer."
+                ) from exc
+        return normalized
+
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{field_name} must be an integer, a list of integers, or null."
+        ) from exc
 
 def _normalize_zones(value: Any) -> list[str] | None:
     if value is None:
