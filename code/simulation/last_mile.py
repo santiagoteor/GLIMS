@@ -96,6 +96,29 @@ def calculate_customer_collection_travel(
                     "stop_sequence": str(
                         customer.get("customer_id", customer_offset + 1)
                     ),
+                    "_stop_ids": [
+                        str(
+                            customer.get(
+                                "customer_id",
+                                customer_offset + 1,
+                            )
+                        )
+                    ],
+                    "_stop_latitudes": [
+                        float(customer["Latitude"])
+                    ],
+                    "_stop_longitudes": [
+                        float(customer["Longitude"])
+                    ],
+                    "_stop_package_loads": [
+                        float(customer["Demand"])
+                    ],
+                    "_stop_arrival_offsets_min": [
+                        float(duration_matrix[0, matrix_index])
+                    ],
+                    "_stop_service_end_offsets_min": [
+                        float(duration_matrix[0, matrix_index])
+                    ],
                 }
             )
 

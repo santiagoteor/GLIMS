@@ -29,6 +29,12 @@ def _build_result(
     co2_kg: float,
     nox_kg: float,
     costs: CostBreakdown,
+    direct_km: float = 0.0,
+    direct_trip_count: int = 0,
+    supply_km: float = 0.0,
+    supply_trip_count: int = 0,
+    last_mile_km: float = 0.0,
+    last_mile_trip_count: int = 0,
 ):
     """Build one result row with a common, auditable cost breakdown."""
 
@@ -68,6 +74,12 @@ def _build_result(
         "paquetes": package_count,
         "km_recorridos": total_km,
         "numero_viajes": trip_count,
+        "direct_km": float(direct_km),
+        "direct_trip_count": int(direct_trip_count),
+        "supply_km": float(supply_km),
+        "supply_trip_count": int(supply_trip_count),
+        "last_mile_km": float(last_mile_km),
+        "last_mile_trip_count": int(last_mile_trip_count),
         "emisiones_co2_kg": co2_kg,
         "emisiones_nox_kg": nox_kg,
         "costo_operacion_ruta_eur": costs.route_operating_cost,
@@ -179,6 +191,8 @@ def simulate_m1(
         co2_kg=co2_kg,
         nox_kg=nox_kg,
         costs=costs,
+        direct_km=route_plan.total_distance_km,
+        direct_trip_count=route_plan.route_count,
     )
 
 
@@ -252,6 +266,8 @@ def simulate_m2(
         co2_kg=co2_kg,
         nox_kg=nox_kg,
         costs=costs,
+        direct_km=route_plan.total_distance_km,
+        direct_trip_count=route_plan.route_count,
     )
 
 
@@ -376,6 +392,10 @@ def simulate_m3(
         co2_kg=supply_co2,
         nox_kg=nox_kg,
         costs=costs,
+        supply_km=supply_plan.total_distance_km,
+        supply_trip_count=supply_plan.route_count,
+        last_mile_km=bike_distance_km,
+        last_mile_trip_count=bike_route_count,
     )
 
 
@@ -503,6 +523,10 @@ def simulate_m4(
         co2_kg=supply_co2,
         nox_kg=nox_kg,
         costs=costs,
+        supply_km=supply_plan.total_distance_km,
+        supply_trip_count=supply_plan.route_count,
+        last_mile_km=walking_distance_km,
+        last_mile_trip_count=walking_route_count,
     )
 
 
@@ -600,4 +624,8 @@ def simulate_m5(
         co2_kg=co2_kg,
         nox_kg=nox_kg,
         costs=costs,
+        supply_km=supply_plan.total_distance_km,
+        supply_trip_count=supply_plan.route_count,
+        last_mile_km=customer_travel_km,
+        last_mile_trip_count=customer_count,
     )

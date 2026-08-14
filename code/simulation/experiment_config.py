@@ -63,6 +63,7 @@ class OsrmCacheExperimentConfig:
 @dataclass(frozen=True)
 class OutputExperimentConfig:
     save_route_details: bool = True
+    save_route_stops: bool = True
     save_configuration: bool = True
     save_metadata: bool = True
     save_route_geometry: bool = False
@@ -371,6 +372,7 @@ def resolve_experiment_config(
     )
     output = OutputExperimentConfig(
         save_route_details=base.output.save_route_details,
+        save_route_stops=base.output.save_route_stops,
         save_configuration=base.output.save_configuration,
         save_metadata=base.output.save_metadata,
         save_route_geometry=_pick(

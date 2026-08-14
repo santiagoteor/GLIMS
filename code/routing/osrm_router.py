@@ -422,6 +422,50 @@ class CapacityAwareOsrmRouter:
                 timeline.total_duration_min for timeline in route_timelines
             ]
 
+        route_stop_arrival_offsets_min = []
+        route_stop_service_end_offsets_min = []
+
+        if route_timelines:
+            for timeline in route_timelines:
+                arrival_offsets = []
+                service_end_offsets = []
+                for segment in timeline.segments:
+                    if segment.destination_index == 0:
+                        continue
+
+                    arrival_offset = (
+                        segment.arrival_datetime - timeline.route_start
+                    ).total_seconds() / 60.0
+                    arrival_offsets.append(float(arrival_offset))
+                    service_end_offsets.append(
+                        float(arrival_offset + SERVICE_TIME_PER_STOP_MIN)
+                    )
+
+                route_stop_arrival_offsets_min.append(arrival_offsets)
+                route_stop_service_end_offsets_min.append(
+                    service_end_offsets
+                )
+        else:
+            for route in routes:
+                current_offset = float(route_start_time_per_route_min)
+                arrival_offsets = []
+                service_end_offsets = []
+                previous_node = 0
+
+                for client_node in route:
+                    current_offset += float(
+                        duration_matrix[previous_node, client_node]
+                    )
+                    arrival_offsets.append(float(current_offset))
+                    current_offset += float(SERVICE_TIME_PER_STOP_MIN)
+                    service_end_offsets.append(float(current_offset))
+                    previous_node = client_node
+
+                route_stop_arrival_offsets_min.append(arrival_offsets)
+                route_stop_service_end_offsets_min.append(
+                    service_end_offsets
+                )
+
         total_duration_min = sum(route_durations)
         route_distances = [
             calculate_routes_matrix_cost(distance_matrix, [route])
@@ -509,6 +553,12 @@ class CapacityAwareOsrmRouter:
             route_shift_feasible=[
                 timeline.shift_feasible for timeline in route_timelines
             ],
+            route_stop_arrival_offsets_min=(
+                route_stop_arrival_offsets_min
+            ),
+            route_stop_service_end_offsets_min=(
+                route_stop_service_end_offsets_min
+            ),
         )
 
     def build_independent_round_trips(

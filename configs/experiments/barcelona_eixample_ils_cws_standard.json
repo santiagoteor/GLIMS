@@ -41,7 +41,8 @@
     "save_metadata": true,
     "save_route_geometry": false,
     "summary_detail": "full",
-    "show_progress": true
+    "show_progress": true,
+    "save_route_stops": true
   },
   "facility_filter": {
     "enabled": true,

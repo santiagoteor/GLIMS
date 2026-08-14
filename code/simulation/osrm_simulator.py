@@ -31,6 +31,12 @@ from code.simulation.experiment_output import (
     slugify,
 )
 from code.simulation.facility_filter import FacilityFilterSettings
+from code.simulation.exporters import (
+    build_facility_summary_frame,
+    build_route_stops_frame,
+    build_routing_plan_metrics_frame,
+    strip_route_export_columns,
+)
 from code.simulation.runner import simulate_city
 from code.simulation.summary_report import build_summary_export
 from code.simulation.traffic import load_traffic_profile
@@ -386,6 +392,12 @@ def _run_city_experiment(
                 ),
                 shift_start=shift_start,
                 shift_end=shift_end,
+                last_service_deadline_enabled=(
+                    routing_config.last_service_deadline_enabled
+                ),
+                last_service_margin_min=(
+                    routing_config.last_service_margin_min
+                ),
             )
 
         def _save_completed_neighborhood(
@@ -402,9 +414,13 @@ def _run_city_experiment(
             zone_slug = slugify(str(neighborhood_name))
             zone_folder = neighborhoods_folder / zone_slug
             routes_folder = zone_folder / "routes"
+            routing_folder = zone_folder / "routing"
+            facilities_folder = zone_folder / "facilities"
             audit_folder = zone_folder / "audit"
 
             routes_folder.mkdir(parents=True, exist_ok=True)
+            routing_folder.mkdir(parents=True, exist_ok=True)
+            facilities_folder.mkdir(parents=True, exist_ok=True)
             audit_folder.mkdir(parents=True, exist_ok=True)
 
             zone_summary = _enrich_summary(results, model_details)
@@ -415,6 +431,42 @@ def _run_city_experiment(
             )
 
             if config.output.save_route_details:
+                if config.output.save_route_stops:
+                    route_stops = build_route_stops_frame(model_details)
+                    if not route_stops.empty:
+                        route_stops.assign(
+                            experiment_id=experiment_id,
+                        ).to_csv(
+                            routes_folder / "route_stops.csv",
+                            index=False,
+                            encoding="utf-8-sig",
+                        )
+
+                facility_summary = build_facility_summary_frame(
+                    model_details
+                )
+                if not facility_summary.empty:
+                    facility_summary.assign(
+                        experiment_id=experiment_id,
+                    ).to_csv(
+                        facilities_folder / "facility_summary.csv",
+                        index=False,
+                        encoding="utf-8-sig",
+                    )
+
+                routing_metrics = build_routing_plan_metrics_frame(
+                    model_details
+                )
+                if not routing_metrics.empty:
+                    routing_metrics.assign(
+                        experiment_id=experiment_id,
+                        selected_traffic_profile=traffic_profile.name,
+                    ).to_csv(
+                        routing_folder / "routing_plan_metrics.csv",
+                        index=False,
+                        encoding="utf-8-sig",
+                    )
+
                 for model_code, detail_df in model_details.items():
                     enriched = detail_df.assign(
                         experiment_id=experiment_id,
@@ -424,7 +476,7 @@ def _run_city_experiment(
                         ),
                         selected_traffic_profile=traffic_profile.name,
                     )
-                    enriched.to_csv(
+                    strip_route_export_columns(enriched).to_csv(
                         routes_folder / f"{model_code.lower()}_routes.csv",
                         index=False,
                         encoding="utf-8-sig",
@@ -556,6 +608,68 @@ def _run_city_experiment(
 
         if config.output.save_route_details:
             routes_folder = experiment_folder / "routes"
+            routing_folder = experiment_folder / "routing"
+            facilities_folder = experiment_folder / "facilities"
+
+            if config.output.save_route_stops:
+                route_stops = build_route_stops_frame(
+                    model_detail_frames
+                )
+                if not route_stops.empty:
+                    route_stops_path = (
+                        routes_folder / "route_stops.csv"
+                    )
+                    route_stops.assign(
+                        experiment_id=experiment_id,
+                    ).to_csv(
+                        route_stops_path,
+                        index=False,
+                        encoding="utf-8-sig",
+                    )
+                    print(
+                        "Route stop details saved to: "
+                        f"{route_stops_path.resolve()}"
+                    )
+
+            facility_summary = build_facility_summary_frame(
+                model_detail_frames
+            )
+            if not facility_summary.empty:
+                facility_summary_path = (
+                    facilities_folder / "facility_summary.csv"
+                )
+                facility_summary.assign(
+                    experiment_id=experiment_id,
+                ).to_csv(
+                    facility_summary_path,
+                    index=False,
+                    encoding="utf-8-sig",
+                )
+                print(
+                    "Facility summary saved to: "
+                    f"{facility_summary_path.resolve()}"
+                )
+
+            routing_metrics = build_routing_plan_metrics_frame(
+                model_detail_frames
+            )
+            if not routing_metrics.empty:
+                routing_metrics_path = (
+                    routing_folder / "routing_plan_metrics.csv"
+                )
+                routing_metrics.assign(
+                    experiment_id=experiment_id,
+                    selected_traffic_profile=traffic_profile.name,
+                ).to_csv(
+                    routing_metrics_path,
+                    index=False,
+                    encoding="utf-8-sig",
+                )
+                print(
+                    "Routing plan metrics saved to: "
+                    f"{routing_metrics_path.resolve()}"
+                )
+
             for model_code, detail_df in model_detail_frames.items():
                 detail_df = detail_df.assign(
                     experiment_id=experiment_id,
@@ -566,7 +680,7 @@ def _run_city_experiment(
                 detail_path = (
                     routes_folder / f"{model_code.lower()}_routes.csv"
                 )
-                detail_df.to_csv(
+                strip_route_export_columns(detail_df).to_csv(
                     detail_path,
                     index=False,
                     encoding="utf-8-sig",
@@ -575,6 +689,26 @@ def _run_city_experiment(
                     f"{model_code} route details saved to: "
                     f"{detail_path.resolve()}"
                 )
+
+        if config.output.save_route_stops:
+            completed_zones = [
+                row
+                for row in neighborhood_status_rows
+                if row.get("status") == "completed"
+            ]
+            if len(completed_zones) == 1:
+                nested_route_stops = (
+                    experiment_folder
+                    / completed_zones[0]["folder"]
+                    / "routes"
+                    / "route_stops.csv"
+                )
+                if nested_route_stops.exists():
+                    nested_route_stops.unlink()
+                    print(
+                        "Removed duplicate single-zone route_stops.csv "
+                        f"from: {nested_route_stops.parent.resolve()}"
+                    )
 
         audit_folder = experiment_folder / "audit"
         audit_folder.mkdir(parents=True, exist_ok=True)

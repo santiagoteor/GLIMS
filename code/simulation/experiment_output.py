@@ -35,6 +35,8 @@ def create_experiment_directory(
     )
     folder = results_root / "experiments" / slugify(city) / experiment_id
     (folder / "routes").mkdir(parents=True, exist_ok=False)
+    (folder / "routing").mkdir(parents=True, exist_ok=False)
+    (folder / "facilities").mkdir(parents=True, exist_ok=False)
     return experiment_id, folder
 
 
