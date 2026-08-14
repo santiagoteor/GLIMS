@@ -24,7 +24,7 @@ class RoutingExperimentConfig:
     ils_relocate_candidate_fraction: float = 0.10
     ils_relocate_neighbor_routes: int = 5
     ils_relocate_max_insertions: int = 3
-    ils_random_seed: int | None = 42
+    ils_random_seed: int | list[int] | None = 42
     last_service_deadline_enabled: bool = False
     last_service_margin_min: float = 30.0
 
@@ -229,6 +229,25 @@ def validate_experiment_config(config: ExperimentConfig) -> None:
         raise ValueError("ils_relocate_neighbor_routes must be greater than zero.")
     if config.routing.ils_relocate_max_insertions <= 0:
         raise ValueError("ils_relocate_max_insertions must be greater than zero.")
+    ils_seed = config.routing.ils_random_seed
+    if isinstance(ils_seed, list):
+        if not ils_seed:
+            raise ValueError("ils_random_seed list cannot be empty.")
+        if any(isinstance(seed, bool) or not isinstance(seed, int) for seed in ils_seed):
+            raise ValueError(
+                "Every value in ils_random_seed must be an integer."
+            )
+        if len(set(ils_seed)) != len(ils_seed):
+            raise ValueError(
+                "ils_random_seed cannot contain duplicate seeds."
+            )
+    elif (
+        ils_seed is not None
+        and (isinstance(ils_seed, bool) or not isinstance(ils_seed, int))
+    ):
+        raise ValueError(
+            "ils_random_seed must be an integer, a list of integers, or null."
+        )
     if config.routing.last_service_margin_min < 0:
         raise ValueError("last_service_margin_min cannot be negative.")
     if (

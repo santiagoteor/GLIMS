@@ -25,15 +25,20 @@ def create_experiment_directory(
         if not config.zones
         else "_".join(slugify(zone) for zone in config.zones)
     )
-    experiment_id = "_".join(
-        [
-            timestamp,
-            zone_label,
-            slugify(config.demand_scenario),
-            str(config.instance_size),
-            slugify(config.routing.algorithm),
-        ]
-    )
+    id_parts = [
+        timestamp,
+        zone_label,
+        slugify(config.demand_scenario),
+        str(config.instance_size),
+        slugify(config.routing.algorithm),
+    ]
+    if (
+        config.routing.algorithm == "ils"
+        and isinstance(config.routing.ils_random_seed, int)
+    ):
+        id_parts.append(f"seed{config.routing.ils_random_seed}")
+
+    experiment_id = "_".join(id_parts)
     folder = results_root / "experiments" / slugify(city) / experiment_id
     (folder / "routes").mkdir(parents=True, exist_ok=False)
     (folder / "routing").mkdir(parents=True, exist_ok=False)
