@@ -95,52 +95,47 @@ def _biased_candidate_positions(
     alpha_max: float,
     rng: np.random.Generator,
     candidate_window: int = 2048,
+    sampling_batch_size: int = 8192,
 ):
-    """
-    Yield savings-list positions using a quasi-geometric biased RCL.
-
-    Savings are already sorted from best to worst. Instead of maintaining an
-    order-statistic tree over all O(n^2) savings, keep only a small ordered
-    Restricted Candidate List (RCL) containing the best remaining positions.
-
-    At each step:
-      * draw a fresh alpha in [alpha_min, alpha_max];
-      * draw a geometric rank;
-      * select that rank inside the ordered RCL;
-      * remove it and append the next unseen saving position.
-
-    The RCL remains ordered by the original savings ranking, so rank 0 is
-    always the best remaining candidate in the current window.
-
-    For alpha_min=0.05, probability mass is already overwhelmingly
-    concentrated in the first few hundred ranks, so a default window of 2048
-    is intentionally conservative while avoiding a 35-million-element
-    Fenwick structure.
-    """
+    """Biased RCL sampling; batch_size=1 reproduces the legacy RNG sequence."""
     if candidate_count <= 0:
         return
-
     window = max(1, min(int(candidate_window), int(candidate_count)))
+    batch_size = max(1, int(sampling_batch_size))
     active = list(range(window))
     next_position = window
 
-    while active:
-        alpha = float(rng.uniform(alpha_min, alpha_max))
-        rank = int(rng.geometric(alpha)) - 1
+    if batch_size == 1:
+        while active:
+            alpha = float(rng.uniform(alpha_min, alpha_max))
+            rank = int(rng.geometric(alpha)) - 1
+            if rank >= len(active):
+                rank = int(rng.integers(0, len(active)))
+            selected_position = active.pop(rank)
+            if next_position < candidate_count:
+                active.append(next_position)
+                next_position += 1
+            yield selected_position
+        return
 
-        if rank >= len(active):
-            # Same finite-list fallback used previously.
-            rank = int(rng.integers(0, len(active)))
+    remaining_draws = int(candidate_count)
+    while active and remaining_draws > 0:
+        draw_count = min(batch_size, remaining_draws)
+        alphas = rng.uniform(alpha_min, alpha_max, size=draw_count)
+        ranks = rng.geometric(alphas) - 1
+        for sampled_rank in ranks:
+            if not active:
+                return
+            rank = int(sampled_rank)
+            if rank >= len(active):
+                rank = int(rng.integers(0, len(active)))
+            selected_position = active.pop(rank)
+            if next_position < candidate_count:
+                active.append(next_position)
+                next_position += 1
+            remaining_draws -= 1
+            yield selected_position
 
-        selected_position = active.pop(rank)
-
-        if next_position < candidate_count:
-            # next_position is worse than every currently active saving, so
-            # appending preserves the RCL's savings order.
-            active.append(next_position)
-            next_position += 1
-
-        yield selected_position
 
 def clarke_wright_savings(
     matrix: np.ndarray,
@@ -158,6 +153,7 @@ def clarke_wright_savings(
     biased_alpha_min: float = 0.05,
     biased_alpha_max: float = 0.25,
     biased_candidate_window: int = 2048,
+    biased_sampling_batch_size: int = 8192,
     max_failed_candidates_without_merge: int | None = 200_000,
     rng: np.random.Generator | None = None,
     profiling_callback=None,
@@ -195,6 +191,12 @@ def clarke_wright_savings(
         if biased_candidate_window <= 0:
             raise ValueError(
                 "biased_candidate_window must be greater than zero."
+            )
+
+        biased_sampling_batch_size = int(biased_sampling_batch_size)
+        if biased_sampling_batch_size <= 0:
+            raise ValueError(
+                "biased_sampling_batch_size must be greater than zero."
             )
 
         if max_failed_candidates_without_merge is not None:
@@ -392,6 +394,7 @@ def clarke_wright_savings(
             alpha_max=biased_alpha_max,
             rng=rng,
             candidate_window=biased_candidate_window,
+            sampling_batch_size=biased_sampling_batch_size,
         )
     else:
         print("Starting CWS route merging...")
@@ -600,6 +603,7 @@ def clarke_wright_savings(
                 "final_routes": int(len(final_routes)),
                 "lower_bound_routes": int(lower_bound_routes),
                 "candidate_window": int(biased_candidate_window) if biased_randomization else None,
+                "sampling_batch_size": int(biased_sampling_batch_size) if biased_randomization else None,
                 "max_failed_candidates_without_merge": (
                     int(max_failed_candidates_without_merge)
                     if biased_randomization and max_failed_candidates_without_merge is not None

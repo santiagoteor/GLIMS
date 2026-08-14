@@ -12,6 +12,7 @@ class RoutingAlgorithmConfig:
     ils_max_full_destruction_attempts: int = 2
     ils_biased_cws_alpha_min: float = 0.05
     ils_biased_cws_alpha_max: float = 0.25
+    ils_biased_cws_sampling_batch_size: int = 8192
     ils_restricted_relocate: bool = True
     ils_relocate_candidate_fraction: float = 0.10
     ils_relocate_neighbor_routes: int = 5
