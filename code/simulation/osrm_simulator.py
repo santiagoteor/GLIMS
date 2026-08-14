@@ -185,34 +185,90 @@ def main() -> None:
         overrides=vars(args),
     )
 
-    seed_value = config.routing.ils_random_seed
-    if isinstance(seed_value, list):
-        if config.routing.algorithm != "ils":
-            raise SystemExit(
-                "Error: a list of ils_random_seed values can only be used "
-                "when routing.algorithm is 'ils'."
-            )
+    expanded_configs = _expand_seed_configs(config)
 
+    if len(expanded_configs) > 1:
         print(
-            "Running independent ILS experiments for seeds: "
-            + ", ".join(str(seed) for seed in seed_value)
+            f"Running {len(expanded_configs)} independent experiment "
+            "replicates:"
         )
-        total = len(seed_value)
-        for index, seed in enumerate(seed_value, start=1):
-            print(
-                f"\n===== ILS seed {seed} ({index}/{total}) ====="
-            )
-            seed_config = replace(
-                config,
-                routing=replace(
-                    config.routing,
-                    ils_random_seed=seed,
-                ),
-            )
-            _run_resolved_config(seed_config)
-        return
 
-    _run_resolved_config(config)
+    total = len(expanded_configs)
+    for index, seed_config in enumerate(expanded_configs, start=1):
+        demand_seed = seed_config.demand_seed
+        ils_seed = seed_config.routing.ils_random_seed
+
+        if total > 1:
+            print(
+                f"\n===== Replicate {index}/{total} | "
+                f"demand_seed={demand_seed} | "
+                f"ils_random_seed={ils_seed} ====="
+            )
+
+        _run_resolved_config(seed_config)
+
+
+def _expand_seed_configs(
+    config: ExperimentConfig,
+) -> list[ExperimentConfig]:
+    """
+    Expand scalar/list demand and ILS seeds into independent configurations.
+
+    Rules:
+    - scalar demand + scalar ILS: one run
+    - scalar demand + ILS list: fixed demand, vary ILS
+    - demand list + scalar ILS: vary demand, fixed ILS
+    - demand list + ILS list: zip 1:1 by position
+    """
+
+    demand_value = config.demand_seed
+    ils_value = config.routing.ils_random_seed
+
+    demand_is_list = isinstance(demand_value, list)
+    ils_is_list = isinstance(ils_value, list)
+
+    if ils_is_list and config.routing.algorithm != "ils":
+        raise SystemExit(
+            "Error: a list of ils_random_seed values can only be used "
+            "when routing.algorithm is 'ils'."
+        )
+
+    if demand_is_list and ils_is_list:
+        if len(demand_value) != len(ils_value):
+            # validate_experiment_config should catch this first, but keep
+            # execution safe for programmatically-created configs too.
+            raise SystemExit(
+                "Error: demand_seed and ils_random_seed lists must have "
+                "the same length for 1:1 pairing."
+            )
+        seed_pairs = list(zip(demand_value, ils_value))
+
+    elif demand_is_list:
+        seed_pairs = [
+            (demand_seed, ils_value)
+            for demand_seed in demand_value
+        ]
+
+    elif ils_is_list:
+        seed_pairs = [
+            (demand_value, ils_seed)
+            for ils_seed in ils_value
+        ]
+
+    else:
+        return [config]
+
+    return [
+        replace(
+            config,
+            demand_seed=demand_seed,
+            routing=replace(
+                config.routing,
+                ils_random_seed=ils_seed,
+            ),
+        )
+        for demand_seed, ils_seed in seed_pairs
+    ]
 
 
 def _run_resolved_config(config: ExperimentConfig) -> None:

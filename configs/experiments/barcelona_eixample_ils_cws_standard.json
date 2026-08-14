@@ -6,7 +6,7 @@
   ],
   "demand_scenario": "low",
   "instance_size": 1000,
-  "demand_seed": 42,
+  "demand_seed": [42, 101, 202, 303, 404],
   "osrm_profile": "driving",
   "routing": {
     "algorithm": "ils",

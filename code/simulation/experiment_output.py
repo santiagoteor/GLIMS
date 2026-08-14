@@ -38,6 +38,9 @@ def create_experiment_directory(
     ):
         id_parts.append(f"seed{config.routing.ils_random_seed}")
 
+    if isinstance(config.demand_seed, int):
+        id_parts.append(f"dseed{config.demand_seed}")
+
     experiment_id = "_".join(id_parts)
     folder = results_root / "experiments" / slugify(city) / experiment_id
     (folder / "routes").mkdir(parents=True, exist_ok=False)
