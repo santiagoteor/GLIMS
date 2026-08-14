@@ -199,6 +199,9 @@ def main() -> None:
         ),
         ils_biased_cws_alpha_min=config.routing.ils_biased_cws_alpha_min,
         ils_biased_cws_alpha_max=config.routing.ils_biased_cws_alpha_max,
+        ils_biased_cws_sampling_batch_size=(
+            config.routing.ils_biased_cws_sampling_batch_size
+        ),
         ils_restricted_relocate=config.routing.ils_restricted_relocate,
         ils_relocate_candidate_fraction=config.routing.ils_relocate_candidate_fraction,
         ils_relocate_neighbor_routes=config.routing.ils_relocate_neighbor_routes,

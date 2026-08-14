@@ -646,6 +646,7 @@ def reconstruct_routes(
     cws_allow_route_reversal: bool = False,
     biased_cws_alpha_min: float = 0.05,
     biased_cws_alpha_max: float = 0.25,
+    biased_cws_sampling_batch_size: int = 8192,
     rng: np.random.Generator | None = None,
     show_progress: bool = False,
     profiling_callback=None,
@@ -691,6 +692,7 @@ def reconstruct_routes(
         biased_randomization=True,
         biased_alpha_min=biased_cws_alpha_min,
         biased_alpha_max=biased_cws_alpha_max,
+        biased_sampling_batch_size=biased_cws_sampling_batch_size,
         rng=rng,
         profiling_callback=profiling_callback,
     )
@@ -762,6 +764,7 @@ def iterated_local_search(
     max_full_destruction_attempts: int = 2,
     biased_cws_alpha_min: float = 0.05,
     biased_cws_alpha_max: float = 0.25,
+    biased_cws_sampling_batch_size: int = 8192,
     restricted_relocate: bool = True,
     relocate_candidate_fraction: float = 0.10,
     relocate_neighbor_routes: int = 5,
@@ -943,6 +946,7 @@ def iterated_local_search(
             cws_allow_route_reversal=cws_allow_route_reversal,
             biased_cws_alpha_min=biased_cws_alpha_min,
             biased_cws_alpha_max=biased_cws_alpha_max,
+            biased_cws_sampling_batch_size=biased_cws_sampling_batch_size,
             rng=rng,
             profiling_callback=profiling_callback,
         )

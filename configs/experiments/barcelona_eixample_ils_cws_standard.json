@@ -24,7 +24,8 @@
     "ils_random_seed": 42,
     "last_service_deadline_enabled": true,
     "last_service_margin_min": 30,
-    "ils_max_full_destruction_attempts": 2
+    "ils_max_full_destruction_attempts": 2,
+    "ils_biased_cws_sampling_batch_size": 8192
   },
   "traffic": {
     "static_profile": "baseline",
