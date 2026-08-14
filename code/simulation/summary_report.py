@@ -35,6 +35,18 @@ COMPACT_COLUMNS = [
 ]
 
 FULL_EXTRA_COLUMNS = [
+    "costo_distancia_eur",
+    "costo_laboral_eur",
+    "costo_facility_fijo_eur",
+    "costo_almacen_fijo_eur",
+    "costo_manipulacion_eur",
+    "costo_vehiculo_fijo_eur",
+    "costo_capex_eur",
+    "costo_tiempo_cliente_eur",
+    "costo_carbono_eur",
+    "co2_kg_por_paquete",
+    "nox_g_por_paquete",
+    "co2_kg_por_km",
     "direct_km",
     "direct_trip_count",
     "supply_km",

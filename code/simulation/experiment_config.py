@@ -68,6 +68,8 @@ class OutputExperimentConfig:
     save_metadata: bool = True
     save_route_geometry: bool = False
     summary_detail: str = "full"
+    audit_detail: str = "summary"
+    performance_profile: str = "basic"
     show_progress: bool = False
 
 @dataclass(frozen=True)
@@ -168,6 +170,19 @@ def validate_experiment_config(config: ExperimentConfig) -> None:
     if config.output.summary_detail not in {"compact", "full"}:
         raise ValueError(
             "output.summary_detail must be either 'compact' or 'full'."
+        )
+    if config.output.audit_detail not in {"summary", "full"}:
+        raise ValueError(
+            "output.audit_detail must be either 'summary' or 'full'."
+        )
+    if config.output.performance_profile not in {
+        "off",
+        "basic",
+        "detailed",
+    }:
+        raise ValueError(
+            "output.performance_profile must be 'off', 'basic', "
+            "or 'detailed'."
         )
     if config.demand_instance_id is not None:
         instance_id = config.demand_instance_id
@@ -380,6 +395,8 @@ def resolve_experiment_config(
             base.output.save_route_geometry,
         ),
         summary_detail=base.output.summary_detail,
+        audit_detail=base.output.audit_detail,
+        performance_profile=base.output.performance_profile,
         show_progress=base.output.show_progress,
     )
     resolved = ExperimentConfig(

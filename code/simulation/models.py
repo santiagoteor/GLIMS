@@ -84,6 +84,15 @@ def _build_result(
         "emisiones_nox_kg": nox_kg,
         "costo_operacion_ruta_eur": costs.route_operating_cost,
         "costo_servicio_facility_eur": costs.facility_service_cost,
+        "costo_distancia_eur": costs.route_distance_cost,
+        "costo_laboral_eur": costs.route_labor_cost,
+        "costo_facility_fijo_eur": costs.facility_fixed_cost,
+        "costo_almacen_fijo_eur": costs.warehouse_fixed_cost,
+        "costo_manipulacion_eur": costs.warehouse_handling_cost,
+        "costo_vehiculo_fijo_eur": costs.vehicle_fixed_cost,
+        "costo_capex_eur": costs.capital_allocation_cost,
+        "costo_tiempo_cliente_eur": costs.customer_time_cost,
+        "costo_carbono_eur": costs.carbon_cost,
         "otros_costos_eur": (
             costs.facility_fixed_cost
             + costs.warehouse_fixed_cost
@@ -97,6 +106,21 @@ def _build_result(
         "costo_por_paquete_eur": (
             costs.total_cost / package_count
             if package_count > 0
+            else 0.0
+        ),
+        "co2_kg_por_paquete": (
+            float(co2_kg) / package_count
+            if package_count > 0
+            else 0.0
+        ),
+        "nox_g_por_paquete": (
+            float(nox_kg) * 1000.0 / package_count
+            if package_count > 0
+            else 0.0
+        ),
+        "co2_kg_por_km": (
+            float(co2_kg) / float(total_km)
+            if float(total_km) > 0
             else 0.0
         ),
     }

@@ -41,6 +41,8 @@
     "save_metadata": true,
     "save_route_geometry": false,
     "summary_detail": "full",
+    "audit_detail": "summary",
+    "performance_profile": "basic",
     "show_progress": true,
     "save_route_stops": true
   },

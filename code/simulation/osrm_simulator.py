@@ -27,9 +27,11 @@ from code.simulation.experiment_config import (
 from code.simulation.experiment_output import (
     build_metadata,
     create_experiment_directory,
+    hash_payload,
     save_json,
     slugify,
 )
+from code.simulation.data_loader import resolve_demand_instance_path
 from code.simulation.facility_filter import FacilityFilterSettings
 from code.simulation.exporters import (
     build_facility_summary_frame,
@@ -263,6 +265,44 @@ def main() -> None:
         )
 
 
+
+SUMMARY_AUDIT_OUTPUTS = {
+    "routing_integrity_summary",
+    "route_customer_summary",
+    "unroutable_customers",
+}
+
+
+def _select_audit_outputs(
+    audit_details: dict[str, pd.DataFrame],
+    *,
+    audit_detail: str,
+    performance_profile: str,
+) -> dict[str, pd.DataFrame]:
+    """Select persisted audit/profiling outputs by verbosity."""
+
+    selected: dict[str, pd.DataFrame] = {}
+
+    for audit_name, audit_df in audit_details.items():
+        if audit_name == "performance_profile":
+            if performance_profile == "off":
+                continue
+            if (
+                performance_profile == "basic"
+                and "category" in audit_df.columns
+            ):
+                audit_df = audit_df.loc[
+                    ~audit_df["category"].eq("routing_detail")
+                ].copy()
+            selected[audit_name] = audit_df
+            continue
+
+        if audit_detail == "full" or audit_name in SUMMARY_AUDIT_OUTPUTS:
+            selected[audit_name] = audit_df
+
+    return selected
+
+
 def _run_city_experiment(
     *,
     config: ExperimentConfig,
@@ -282,6 +322,17 @@ def _run_city_experiment(
     )
     metadata_path = experiment_folder / "metadata.json"
 
+    provenance_config = config.to_dict()
+    provenance_config["resolved_city"] = active_city
+    config_hash = hash_payload(provenance_config)
+    demand_file = resolve_demand_instance_path(
+        active_city,
+        config.demand_scenario,
+        config.instance_size,
+        demand_seed=config.demand_seed,
+        demand_instance_id=config.demand_instance_id,
+    )
+
     if config.output.save_configuration:
         resolved_config = config.to_dict()
         resolved_config["resolved_city"] = active_city
@@ -296,6 +347,8 @@ def _run_city_experiment(
                 started_at=started_at,
                 finished_at=None,
                 status="running",
+                config_hash=config_hash,
+                demand_file=demand_file,
             ),
         )
 
@@ -482,7 +535,12 @@ def _run_city_experiment(
                         encoding="utf-8-sig",
                     )
 
-            for audit_name, audit_df in audit_details.items():
+            selected_audits = _select_audit_outputs(
+                audit_details,
+                audit_detail=config.output.audit_detail,
+                performance_profile=config.output.performance_profile,
+            )
+            for audit_name, audit_df in selected_audits.items():
                 enriched_audit = audit_df.assign(
                     experiment_id=experiment_id,
                     routing_algorithm=routing_config.algorithm,
@@ -501,6 +559,8 @@ def _run_city_experiment(
                         started_at=started,
                         finished_at=finished,
                         status="completed",
+                        config_hash=config_hash,
+                        demand_file=demand_file,
                     ),
                 )
 
@@ -543,6 +603,8 @@ def _run_city_experiment(
                         finished_at=finished,
                         status="failed",
                         error=f"{type(error).__name__}: {error}",
+                        config_hash=config_hash,
+                        demand_file=demand_file,
                     ),
                 )
 
@@ -713,7 +775,12 @@ def _run_city_experiment(
         audit_folder = experiment_folder / "audit"
         audit_folder.mkdir(parents=True, exist_ok=True)
 
-        for audit_name, audit_df in audit_frames.items():
+        selected_audits = _select_audit_outputs(
+            audit_frames,
+            audit_detail=config.output.audit_detail,
+            performance_profile=config.output.performance_profile,
+        )
+        for audit_name, audit_df in selected_audits.items():
             audit_df = audit_df.assign(
                 experiment_id=experiment_id,
                 routing_algorithm=routing_config.algorithm,
@@ -761,6 +828,8 @@ def _run_city_experiment(
                         if failed_zone_count
                         else None
                     ),
+                    config_hash=config_hash,
+                    demand_file=demand_file,
                 ),
             )
         print(
@@ -778,6 +847,8 @@ def _run_city_experiment(
                     finished_at=finished_at,
                     status="failed",
                     error=f"{type(exc).__name__}: {exc}",
+                    config_hash=config_hash,
+                    demand_file=demand_file,
                 ),
             )
         raise
