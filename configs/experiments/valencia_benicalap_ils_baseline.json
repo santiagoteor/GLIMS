@@ -1,8 +1,8 @@
 {
-  "experiment_name": "barcelona_eixample_ils_baseline",
-  "city": "barcelona",
+  "experiment_name": "valencia_benicalap_ils_baseline",
+  "city": "valencia",
   "zones": [
-    "l'Eixample", "Ciutat Vella", "El Carmel"
+    "Benicalap:neighborhood", "Camins al Grau", "La Punta"
   ],
   "demand_scenario": "low",
   "instance_size": 1000,
@@ -39,7 +39,7 @@
     "save_route_details": true,
     "save_configuration": true,
     "save_metadata": true,
-    "save_route_geometry": false,
+    "save_route_geometry": true,
     "summary_detail": "full",
     "audit_detail": "summary",
     "performance_profile": "basic",
@@ -50,7 +50,7 @@
     "enabled": true,
     "initial_buffer_m": 500,
     "buffer_increment_m": 500,
-    "maximum_buffer_m": 5000,
+    "maximum_buffer_m": 7000,
     "minimum_candidates": 5
   },
   "facility_assignment": {

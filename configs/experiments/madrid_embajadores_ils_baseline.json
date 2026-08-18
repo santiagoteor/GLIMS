@@ -1,8 +1,8 @@
 {
-  "experiment_name": "barcelona_eixample_ils_baseline",
-  "city": "barcelona",
+  "experiment_name": "madrid_embajadores_ils_baseline",
+  "city": "madrid",
   "zones": [
-    "l'Eixample", "Ciutat Vella", "El Carmel"
+    "Embajadores", "Moratalaz", "El Pardo"
   ],
   "demand_scenario": "low",
   "instance_size": 1000,
