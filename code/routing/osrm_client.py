@@ -14,7 +14,7 @@ import numpy as np
 
 _OSRM_CACHE_ENABLED = False
 _OSRM_CACHE_DIRECTORY = Path(".glims_cache") / "osrm"
-_OSRM_CACHE_FORMAT_VERSION = "v1"
+_OSRM_CACHE_FORMAT_VERSION = "v3_snap_audit_square"
 
 _OSRM_CACHE_STATS = {
     "cache_hits": 0,
@@ -24,6 +24,99 @@ _OSRM_CACHE_STATS = {
     "http_requests": 0,
     "http_seconds": 0.0,
 }
+
+
+# Snapping metadata observed in OSRM /table responses.
+# Keys are scoped by host/profile and the original input coordinate.
+# The registry is audit-only: routing matrices and optimization costs are
+# intentionally left unchanged.
+_OSRM_SNAP_REGISTRY: dict[tuple[str, str, float, float], dict] = {}
+
+
+def _snap_registry_key(
+    *,
+    host: str,
+    profile: str,
+    longitude: float,
+    latitude: float,
+) -> tuple[str, str, float, float]:
+    return (
+        str(host),
+        str(profile),
+        round(float(longitude), 6),
+        round(float(latitude), 6),
+    )
+
+
+def _record_snap_waypoints(
+    *,
+    request_coords,
+    coordinate_indices,
+    waypoints,
+    host: str,
+    profile: str,
+) -> None:
+    """Record OSRM waypoint snapping metadata without affecting routing."""
+    if not isinstance(waypoints, list):
+        return
+
+    indices = list(coordinate_indices)
+    for index, waypoint in zip(indices, waypoints):
+        if not 0 <= int(index) < len(request_coords):
+            continue
+        if not isinstance(waypoint, dict):
+            continue
+
+        location = waypoint.get("location")
+        if not isinstance(location, (list, tuple)) or len(location) < 2:
+            continue
+
+        original_lon, original_lat = request_coords[int(index)]
+        snapped_lon, snapped_lat = location[:2]
+        distance_m = waypoint.get("distance")
+
+        record = {
+            "original_longitude": float(original_lon),
+            "original_latitude": float(original_lat),
+            "snapped_longitude": float(snapped_lon),
+            "snapped_latitude": float(snapped_lat),
+            "snap_distance_m": (
+                float(distance_m) if distance_m is not None else np.nan
+            ),
+        }
+        _OSRM_SNAP_REGISTRY[
+            _snap_registry_key(
+                host=host,
+                profile=profile,
+                longitude=original_lon,
+                latitude=original_lat,
+            )
+        ] = record
+
+
+def get_osrm_snap_records(
+    coords,
+    *,
+    host: str,
+    profile: str,
+    include_missing: bool = True,
+) -> list[dict | None]:
+    """Return audit-only snap metadata aligned with the supplied coordinates."""
+    records: list[dict | None] = []
+    for lon, lat in coords:
+        record = _OSRM_SNAP_REGISTRY.get(
+            _snap_registry_key(
+                host=host,
+                profile=profile,
+                longitude=lon,
+                latitude=lat,
+            )
+        )
+        if record is not None:
+            records.append(dict(record))
+        elif include_missing:
+            records.append(None)
+    return records
 
 
 def configure_osrm_matrix_cache(
@@ -40,6 +133,7 @@ def configure_osrm_matrix_cache(
 
 
 def reset_osrm_cache_stats() -> None:
+    _OSRM_SNAP_REGISTRY.clear()
     for key in _OSRM_CACHE_STATS:
         _OSRM_CACHE_STATS[key] = (
             0 if key in {"cache_hits", "cache_misses", "http_requests"} else 0.0
@@ -81,7 +175,7 @@ def _matrix_cache_path(
     return _OSRM_CACHE_DIRECTORY / f"{matrix_kind}_{digest.hexdigest()}.npz"
 
 
-def _load_cached_matrices(path: Path):
+def _load_cached_matrices(path: Path, *, host: str, profile: str):
     if not _OSRM_CACHE_ENABLED:
         return None
     if not path.exists():
@@ -93,6 +187,42 @@ def _load_cached_matrices(path: Path):
         with np.load(path, allow_pickle=False) as payload:
             distance_matrix = np.asarray(payload["distance"], dtype=float)
             duration_matrix = np.asarray(payload["duration"], dtype=float)
+
+            if {
+                "snap_original_lon",
+                "snap_original_lat",
+                "snap_snapped_lon",
+                "snap_snapped_lat",
+                "snap_distance_m",
+            }.issubset(payload.files):
+                original_lon = np.asarray(payload["snap_original_lon"], dtype=float)
+                original_lat = np.asarray(payload["snap_original_lat"], dtype=float)
+                snapped_lon = np.asarray(payload["snap_snapped_lon"], dtype=float)
+                snapped_lat = np.asarray(payload["snap_snapped_lat"], dtype=float)
+                snap_distance = np.asarray(payload["snap_distance_m"], dtype=float)
+
+                for values in zip(
+                    original_lon,
+                    original_lat,
+                    snapped_lon,
+                    snapped_lat,
+                    snap_distance,
+                ):
+                    o_lon, o_lat, s_lon, s_lat, distance_m = values
+                    _OSRM_SNAP_REGISTRY[
+                        _snap_registry_key(
+                            host=host,
+                            profile=profile,
+                            longitude=o_lon,
+                            latitude=o_lat,
+                        )
+                    ] = {
+                        "original_longitude": float(o_lon),
+                        "original_latitude": float(o_lat),
+                        "snapped_longitude": float(s_lon),
+                        "snapped_latitude": float(s_lat),
+                        "snap_distance_m": float(distance_m),
+                    }
     except Exception as exc:
         print(
             f"OSRM cache entry unreadable; rebuilding {path.name}: "
@@ -119,6 +249,8 @@ def _save_cached_matrices(
     path: Path,
     distance_matrix: np.ndarray,
     duration_matrix: np.ndarray,
+    *,
+    snap_records: list[dict | None] | None = None,
 ) -> None:
     if not _OSRM_CACHE_ENABLED:
         return
@@ -129,10 +261,33 @@ def _save_cached_matrices(
 
     # Uncompressed and float64 on purpose: faster I/O and no routing precision
     # changes versus the matrices returned directly by OSRM.
+    valid_snap_records = [
+        record for record in (snap_records or []) if record is not None
+    ]
     np.savez(
         temporary,
         distance=np.asarray(distance_matrix, dtype=np.float64),
         duration=np.asarray(duration_matrix, dtype=np.float64),
+        snap_original_lon=np.asarray(
+            [record["original_longitude"] for record in valid_snap_records],
+            dtype=np.float64,
+        ),
+        snap_original_lat=np.asarray(
+            [record["original_latitude"] for record in valid_snap_records],
+            dtype=np.float64,
+        ),
+        snap_snapped_lon=np.asarray(
+            [record["snapped_longitude"] for record in valid_snap_records],
+            dtype=np.float64,
+        ),
+        snap_snapped_lat=np.asarray(
+            [record["snapped_latitude"] for record in valid_snap_records],
+            dtype=np.float64,
+        ),
+        snap_distance_m=np.asarray(
+            [record["snap_distance_m"] for record in valid_snap_records],
+            dtype=np.float64,
+        ),
     )
     temporary.replace(path)
 
@@ -263,6 +418,29 @@ def _request_osrm_distance_duration_table(
             f"{payload.get('message', '')}"
         )
 
+    source_indices = (
+        list(sources) if sources is not None else list(range(len(coords)))
+    )
+    destination_indices = (
+        list(destinations)
+        if destinations is not None
+        else list(range(len(coords)))
+    )
+    _record_snap_waypoints(
+        request_coords=coords,
+        coordinate_indices=source_indices,
+        waypoints=payload.get("sources", []),
+        host=host,
+        profile=profile,
+    )
+    _record_snap_waypoints(
+        request_coords=coords,
+        coordinate_indices=destination_indices,
+        waypoints=payload.get("destinations", []),
+        host=host,
+        profile=profile,
+    )
+
     distance_matrix = np.array(payload["distances"], dtype=float) / 1000.0
     duration_matrix = np.array(payload["durations"], dtype=float) / 60.0
 
@@ -367,7 +545,7 @@ def osrm_distance_duration_table_rectangular(
         source_coords=source_coords,
         destination_coords=destination_coords,
     )
-    cached = _load_cached_matrices(cache_path)
+    cached = _load_cached_matrices(cache_path, host=host, profile=profile)
     if cached is not None:
         return cached
 
@@ -464,7 +642,18 @@ def osrm_distance_duration_table_rectangular(
                     end="\r" if completed < request_count else "\n",
                 )
 
-    _save_cached_matrices(cache_path, distance_matrix, duration_matrix)
+    snap_records = get_osrm_snap_records(
+        source_coords + destination_coords,
+        host=host,
+        profile=profile,
+        include_missing=False,
+    )
+    _save_cached_matrices(
+        cache_path,
+        distance_matrix,
+        duration_matrix,
+        snap_records=snap_records,
+    )
     return distance_matrix, duration_matrix
 
 def osrm_distance_duration_table(
@@ -481,7 +670,7 @@ def osrm_distance_duration_table(
         profile=profile,
         source_coords=coords,
     )
-    cached = _load_cached_matrices(cache_path)
+    cached = _load_cached_matrices(cache_path, host=host, profile=profile)
     if cached is not None:
         return cached
 
@@ -533,7 +722,22 @@ def osrm_distance_duration_table(
             ) from exc
 
     distance_matrix, duration_matrix = result
-    _save_cached_matrices(cache_path, distance_matrix, duration_matrix)
+
+    # Preserve audit-only snapping metadata in the square-matrix cache.
+    # Otherwise a later cache HIT restores the routing matrices while leaving
+    # the snap registry empty, producing blank snapping-audit distances.
+    snap_records = get_osrm_snap_records(
+        coords,
+        host=host,
+        profile=profile,
+        include_missing=False,
+    )
+    _save_cached_matrices(
+        cache_path,
+        distance_matrix,
+        duration_matrix,
+        snap_records=snap_records,
+    )
     return distance_matrix, duration_matrix
 
 

@@ -17,7 +17,11 @@ from code.routing.osrm_client import (
     reset_osrm_cache_stats,
 )
 from code.simulation.data_loader import load_city_data, load_classified_locations, load_demand_instance
-from code.simulation.audit import audit_customer_routes, build_unroutable_customer_rows
+from code.simulation.audit import (
+    audit_customer_routes,
+    build_osrm_snapping_audit_rows,
+    build_unroutable_customer_rows,
+)
 from code.simulation.demand import calculate_demand_weighted_centroid
 from code.simulation.exporters import build_route_detail_rows
 from code.simulation.last_mile import (
@@ -153,6 +157,7 @@ def simulate_neighborhood(
                 "route_customer_summary": [],
                 "routing_integrity_summary": [],
                 "unroutable_customers": [],
+                "osrm_snapping_audit": [],
                 "performance_profile": [],
             },
         )
@@ -600,11 +605,20 @@ def simulate_neighborhood(
             route_customer_summary_rows.extend(model_route_rows)
             routing_integrity_summary_rows.append(model_summary_row)
 
+        osrm_snapping_audit_rows = build_osrm_snapping_audit_rows(
+            city=city,
+            neighborhood_name=neighborhood_name,
+            original_clients=original_demand_points,
+            excluded_positions=excluded_positions,
+            customer_route_audit_rows=customer_route_audit_rows,
+        )
+
     audit_details = {
         "customer_route_audit": customer_route_audit_rows,
         "route_customer_summary": route_customer_summary_rows,
         "routing_integrity_summary": routing_integrity_summary_rows,
         "unroutable_customers": unroutable_customer_rows,
+        "osrm_snapping_audit": osrm_snapping_audit_rows,
         "performance_profile": performance_rows,
     }
 
@@ -733,6 +747,7 @@ def simulate_city(
         "route_customer_summary": [],
         "routing_integrity_summary": [],
         "unroutable_customers": [],
+        "osrm_snapping_audit": [],
         "performance_profile": [],
     }
  

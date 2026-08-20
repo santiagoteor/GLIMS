@@ -360,6 +360,7 @@ SUMMARY_AUDIT_OUTPUTS = {
     "routing_integrity_summary",
     "route_customer_summary",
     "unroutable_customers",
+    "osrm_snapping_audit",
 }
 
 
