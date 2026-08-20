@@ -174,10 +174,6 @@ class CapacityAwareOsrmRouter:
             else []
         )
 
-        # If clients were excluded, cache the already-sanitized reduced matrix
-        # under its own coordinate key. M2 uses the same depot and filtered
-        # demand, so it can reuse this matrix instead of making another large
-        # OSRM /table request.
         if unroutable_client_positions:
             filtered_coords = [(depot_longitude, depot_latitude)] + list(
                 zip(clients["Longitude"], clients["Latitude"])
@@ -195,6 +191,21 @@ class CapacityAwareOsrmRouter:
             f"Starting routing preparation for {len(clients)} clients "
             f"using {routing_algorithm.upper()}..."
         )
+
+        if routing_algorithm not in {"cws", "ils"}:
+            raise ValueError(
+                "Unsupported routing algorithm: "
+                f"{routing_algorithm!r}. Expected 'cws' or 'ils'."
+            )
+
+        if len(clients) <= 1:
+            print(
+                "Only one client in this group — skipping ILS, "
+                "using a direct CWS route instead."
+            )
+            effective_routing_algorithm = "cws"
+        else:
+            effective_routing_algorithm = routing_algorithm
 
         preparation_start = perf_counter()
         
@@ -228,7 +239,7 @@ class CapacityAwareOsrmRouter:
         )
         
 
-        if routing_algorithm == "cws":
+        if effective_routing_algorithm == "cws":
             algorithm_start = perf_counter()
             total_distance_km, routes = clarke_wright_savings(
                 matrix=distance_matrix,
@@ -250,7 +261,7 @@ class CapacityAwareOsrmRouter:
             ils_iterations_completed = 0
             ils_iterations_without_improvement_final = 0
 
-        elif routing_algorithm == "ils":
+        elif effective_routing_algorithm == "ils":
             print("Building reference CWS solution for ILS comparison...")
             reference_cws_start = perf_counter()
 
@@ -321,7 +332,7 @@ class CapacityAwareOsrmRouter:
         else:
             raise ValueError(
                 "Unsupported routing algorithm: "
-                f"{routing_algorithm!r}. Expected 'cws' or 'ils'."
+                f"{effective_routing_algorithm!r}. Expected 'cws' or 'ils'."
             )
 
         initial_distance_km = float(initial_distance_km)
@@ -337,7 +348,7 @@ class CapacityAwareOsrmRouter:
         )
 
         print(
-            f"Routing metrics [{routing_algorithm.upper()} | {transport_mode}]: "
+            f"Routing metrics [{effective_routing_algorithm.upper()} | {transport_mode}]: "
             f"initial={initial_distance_km:.3f} km | "
             f"final={total_distance_km:.3f} km | "
             f"improvement={improvement_distance_km:.3f} km "
@@ -499,11 +510,11 @@ class CapacityAwareOsrmRouter:
             cws_initial_distance_km=float(cws_initial_distance_km),
             cws_initial_route_count=int(cws_initial_route_count),
             cws_runtime_seconds=float(cws_runtime_seconds),
-            ils_final_distance_km=(total_distance_km if routing_algorithm == "ils" else 0.0),
-            ils_final_route_count=(len(routes) if routing_algorithm == "ils" else 0),
-            ils_improvement_km=(improvement_distance_km if routing_algorithm == "ils" else 0.0),
-            ils_improvement_percent=(improvement_percent if routing_algorithm == "ils" else 0.0),
-            ils_runtime_seconds=(float(routing_runtime_seconds) if routing_algorithm == "ils" else 0.0),
+            ils_final_distance_km=(total_distance_km if effective_routing_algorithm == "ils" else 0.0),
+            ils_final_route_count=(len(routes) if effective_routing_algorithm == "ils" else 0),
+            ils_improvement_km=(improvement_distance_km if effective_routing_algorithm == "ils" else 0.0),
+            ils_improvement_percent=(improvement_percent if effective_routing_algorithm == "ils" else 0.0),
+            ils_runtime_seconds=(float(routing_runtime_seconds) if effective_routing_algorithm == "ils" else 0.0),
             ils_iterations_completed=int(ils_iterations_completed),
             ils_iterations_without_improvement=int(ils_iterations_without_improvement_final),
             unroutable_customer_count=len(unroutable_client_positions),
