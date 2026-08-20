@@ -159,7 +159,7 @@ def combine_city(city: str) -> None:
 
     zones = gpd.GeoDataFrame(pd.concat(parts, ignore_index=True), crs="EPSG:4326")
 
-    output_path = folder / "limites_zonas.geojson"
+    output_path = folder / "zones_limits.geojson"
     zones.to_file(output_path, driver="GeoJSON")
 
     n_dist = int((zones["tipo"] == "district").sum())
@@ -171,7 +171,7 @@ def combine_city(city: str) -> None:
 
 
 def build_zones(cities: list[str]) -> None:
-    """Run STEP 2 for the given cities: build limites_zonas.geojson."""
+    """Run STEP 2 for the given cities: build zones_limits.geojson."""
 
     for city in cities:
         print(f"\n{city}:")

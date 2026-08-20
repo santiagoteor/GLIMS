@@ -5,6 +5,8 @@ from typing import Iterable
 
 import pandas as pd
 
+from code.routing.osrm_client import get_osrm_host, get_osrm_snap_records
+
 
 CUSTOMER_ID_COLUMNS = ("customer_id", "Customer_ID", "ID", "id")
 
@@ -87,6 +89,99 @@ def build_unroutable_customer_rows(
                 "action": "excluded_from_all_models",
             }
         )
+
+    return rows
+
+
+def build_osrm_snapping_audit_rows(
+    *,
+    city: str,
+    neighborhood_name: str,
+    original_clients: pd.DataFrame,
+    excluded_positions: Iterable[int] = (),
+    customer_route_audit_rows: Iterable[dict] = (),
+) -> list[dict]:
+    """Build an informational OSRM snapping audit without changing routing."""
+    original = original_clients.reset_index(drop=True)
+    id_column = _customer_id_column(original)
+    excluded = {int(position) for position in excluded_positions}
+
+    # Routing is completed before this audit is built, so attach the route
+    # assignment without changing OSRM snapping or optimization behavior.
+    # Keying by (model, leg, customer_id) prevents cross-model assignments.
+    route_lookup: dict[tuple[str, str, str], tuple[str, str]] = {}
+    for audit_row in customer_route_audit_rows:
+        key = (
+            str(audit_row.get("model", "")),
+            str(audit_row.get("leg", "")),
+            _normalize_id(audit_row.get("customer_id", "")),
+        )
+        route_lookup[key] = (
+            str(audit_row.get("route_ids", "")),
+            str(audit_row.get("route_numbers", "")),
+        )
+
+    coords = list(
+        zip(
+            original["Longitude"].astype(float),
+            original["Latitude"].astype(float),
+        )
+    )
+
+    audit_specs = (
+        ("M1", "direct_delivery", "driving"),
+        ("M2", "direct_delivery", "driving"),
+        ("M3", "cycling_last_mile", "cycling"),
+        ("M4", "walking_last_mile", "walking"),
+        ("M5", "customer_collection", "walking"),
+    )
+
+    rows: list[dict] = []
+    for model, leg, profile in audit_specs:
+        records = get_osrm_snap_records(
+            coords,
+            host=get_osrm_host(city, profile),
+            profile=profile,
+            include_missing=True,
+        )
+
+        for position, (customer, record) in enumerate(
+            zip(original.to_dict("records"), records)
+        ):
+            customer_id = _normalize_id(customer[id_column])
+            route_id, route_number = route_lookup.get(
+                (model, leg, customer_id),
+                ("", ""),
+            )
+
+            row = {
+                "city": city,
+                "neighborhood": neighborhood_name,
+                "model": model,
+                "leg": leg,
+                "osrm_profile": profile,
+                "route_id": route_id,
+                "route_number": route_number,
+                "customer_id": customer_id,
+                "original_customer_position": position,
+                "demand": float(customer.get("Demand", 0.0)),
+                "original_latitude": float(customer["Latitude"]),
+                "original_longitude": float(customer["Longitude"]),
+                "excluded_as_unroutable": position in excluded,
+                "snap_available": record is not None,
+                "snapped_latitude": "",
+                "snapped_longitude": "",
+                "snap_distance_m": "",
+            }
+            if record is not None:
+                row.update(
+                    {
+                        "snapped_latitude": record["snapped_latitude"],
+                        "snapped_longitude": record["snapped_longitude"],
+                        "snap_distance_m": record["snap_distance_m"],
+                    }
+                )
+            rows.append(row)
 
     return rows
 
