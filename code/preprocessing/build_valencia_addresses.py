@@ -1,17 +1,19 @@
-
-
 from __future__ import annotations
+
+import sys
+from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
 
+from code.common.paths import DATA_DIR, RAW_DATA_DIR
 
-PORTALS_PATH   = "data/valencia/portals_valencia_full.geojson"
-DISTRICTS_PATH = "raw_data/Valencia/distritos_valencia.geoJSON"
-BARRIOS_PATH   = "raw_data/Valencia/barrios_valencia.geoJSON"
-SECCIONS_PATH  = "raw_data/Valencia/secc_cens_valencia.geoJSON"
+PORTALS_PATH   = DATA_DIR / "valencia" / "portals_valencia_full.geojson"
+DISTRICTS_PATH = RAW_DATA_DIR / "Valencia" / "distritos_valencia.geoJSON"
+BARRIOS_PATH   = RAW_DATA_DIR / "Valencia" / "barrios_valencia.geoJSON"
+SECCIONS_PATH  = RAW_DATA_DIR / "Valencia" / "secc_cens_valencia.geoJSON"
 
-OUTPUT_PATH = "data/valencia/direcciones_valencia.csv"
+OUTPUT_PATH = DATA_DIR / "valencia" / "direcciones_valencia.csv"
 
 # Source columns holding the administrative CODE of each layer.
 DISTRICT_CODE_COL = "coddistrit"    # -> districte
@@ -128,3 +130,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# We have to be careful with which administrative boundaries we use

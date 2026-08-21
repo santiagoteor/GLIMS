@@ -1,0 +1,67 @@
+{
+  "experiment_name": "barcelona_eixample_ils_baseline",
+  "city": "barcelona",
+  "zones": [
+    "l'Eixample",
+    "Ciutat Vella",
+    "El Carmel"
+  ],
+  "demand_scenario": "low",
+  "instance_size": 1000,
+  "demand_seed": 42,
+  "demand_instance_id": null,
+  "osrm_profile": "driving",
+  "routing": {
+    "algorithm": "ils",
+    "cws_allow_route_reversal": false,
+    "ils_max_iterations": 100,
+    "ils_max_no_improvement": 20,
+    "ils_destruction_percentage_step": 10,
+    "ils_max_destruction_percentage": 100,
+    "ils_max_full_destruction_attempts": 2,
+    "ils_biased_cws_alpha_min": 0.05,
+    "ils_biased_cws_alpha_max": 0.25,
+    "ils_biased_cws_sampling_batch_size": 8192,
+    "ils_restricted_relocate": true,
+    "ils_relocate_candidate_fraction": 0.1,
+    "ils_relocate_neighbor_routes": 5,
+    "ils_relocate_max_insertions": 3,
+    "ils_random_seed": 42,
+    "last_service_deadline_enabled": true,
+    "last_service_margin_min": 30
+  },
+  "traffic": {
+    "static_profile": "baseline",
+    "static_multiplier_override": null,
+    "time_profile": "weekday_schedule",
+    "simulation_date": "2026-07-31",
+    "shift_start": "09:00",
+    "shift_duration_min": 480
+  },
+  "facility_filter": {
+    "enabled": true,
+    "initial_buffer_m": 500,
+    "buffer_increment_m": 500,
+    "maximum_buffer_m": 5000,
+    "minimum_candidates": 5
+  },
+  "facility_assignment": {
+    "pudo_capacity_mode": "unlimited",
+    "microhub_capacity_mode": "unlimited"
+  },
+  "osrm_cache": {
+    "enabled": true,
+    "directory": ".glims_cache/osrm"
+  },
+  "output": {
+    "save_route_details": true,
+    "save_route_stops": true,
+    "save_configuration": true,
+    "save_metadata": true,
+    "save_route_geometry": true,
+    "summary_detail": "compact",
+    "audit_detail": "summary",
+    "performance_profile": "basic",
+    "show_progress": true
+  }
+}

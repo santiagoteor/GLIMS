@@ -1,195 +1,44 @@
 import argparse
-import json
-import math
+import colorsys
+import hashlib
+import sqlite3
+import sys
 from pathlib import Path
 
 import pandas as pd
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from code.common.paths import PROJECT_ROOT, RESULTS_DIR
 
-BASE_DIR = Path(__file__).resolve().parent
-GLIMS_DIR = BASE_DIR.parent.parent
 CITY = "madrid"
-DEFAULT_INPUT_DIR = GLIMS_DIR / "results" / CITY / "demand"
-DEFAULT_OUTPUT_DIR = GLIMS_DIR / "QGIS" / CITY
+DEFAULT_INPUT_DIR = RESULTS_DIR / CITY / "demand"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "QGIS" / CITY
 
-LON_CANDIDATES = ["lon", "longitude", "longitud", "lng", "x_wgs84"]
-LAT_CANDIDATES = ["lat", "latitude", "latitud", "y_wgs84"]
-X_CANDIDATES = ["x_utm", "x_etrs89", "x", "coord_x", "utm_x"]
-Y_CANDIDATES = ["y_utm", "y_etrs89", "y", "coord_y", "utm_y"]
+MODEL_COL = "model"
+ROUTE_ID_COL = "route_id"
+EXPERIMENT_COL = "experiment_id"
+LEG_COL = "leg"
 
-VECTOR_EXTS = {".geojson", ".json", ".gpkg", ".shp", ".gml", ".kml"}
+ROUTE_MARKER_COLS = {"geometry_wkt"}
+STOP_MARKER_COLS = {"stop_id", "latitude", "longitude"}
 
-DEFAULT_SOURCE_CRS = "EPSG:25830"
-DEFAULT_TARGET_CRS = "EPSG:4326"
+DEFAULT_CRS = "EPSG:4326"
 
-def _norm(s: str) -> str:
-    return str(s).strip().lower()
-
-
-def _pick(columns, candidates):
-    """Return the first column (original name) matching a candidate."""
-    norm_map = {_norm(c): c for c in columns}
-    for cand in candidates:
-        if cand in norm_map:
-            return norm_map[cand]
-    return None
+ROUTE_LINE_WIDTH_MM = 0.7
+STOP_SIZE_MM = 2.6
+FALLBACK_COLOR = "120,120,120,255"
 
 
-def _clean_value(v):
-    """Make a value JSON-serializable (NaN/NA -> None, numpy -> python)."""
-    if v is None:
-        return None
-    if isinstance(v, float) and math.isnan(v):
-        return None
-    try:
-        if pd.isna(v):
-            return None
-    except (TypeError, ValueError):
-        pass
-    if hasattr(v, "item"):          # numpy scalar
-        try:
-            return v.item()
-        except Exception:
-            pass
-    if isinstance(v, (pd.Timestamp,)):
-        return str(v)
-    return v
+# --------------------------------------------------------------------------
+# File discovery and classification
+# --------------------------------------------------------------------------
 
-
-def _safe_layer_name(path: Path) -> str:
-    """A clean layer name from a filename (no spaces/dots)."""
-    stem = path.stem
-    return "".join(ch if (ch.isalnum() or ch == "_") else "_" for ch in stem)
-
-def load_point_csv(path: Path, lon_col=None, lat_col=None,
-                   source_crs=DEFAULT_SOURCE_CRS):
-    """
-    Read a point CSV. Returns a dict describing the layer:
-        {name, kind:'point', df, lon, lat, x, y, crs}
-    Prefers lon/lat (assumed WGS84). Falls back to x/y (source_crs).
-    """
-    df = pd.read_csv(path)
-
-    lon = lon_col or _pick(df.columns, LON_CANDIDATES)
-    lat = lat_col or _pick(df.columns, LAT_CANDIDATES)
-    x = _pick(df.columns, X_CANDIDATES)
-    y = _pick(df.columns, Y_CANDIDATES)
-
-    if lon and lat:
-        crs = "EPSG:4326"
-        xcol, ycol = lon, lat
-    elif x and y:
-        crs = source_crs
-        xcol, ycol = x, y
-        print(f"    [info] no lon/lat found; using '{x}'/'{y}' as {source_crs}")
-    else:
-        raise ValueError(
-            f"{path.name}: could not find coordinate columns. "
-            f"Looked for lon/lat {LON_CANDIDATES}/{LAT_CANDIDATES} "
-            f"or x/y {X_CANDIDATES}/{Y_CANDIDATES}. "
-            "Pass --lon-col/--lat-col explicitly."
-        )
-
-    # drop rows without coordinates
-    before = len(df)
-    df = df.dropna(subset=[xcol, ycol]).copy()
-    dropped = before - len(df)
-    if dropped:
-        print(f"    [info] dropped {dropped} rows without coordinates")
-
-    return {
-        "name": _safe_layer_name(path),
-        "kind": "point",
-        "df": df,
-        "xcol": xcol,
-        "ycol": ycol,
-        "crs": crs,
-    }
-
-
-def point_layer_to_geojson(layer: dict) -> dict:
-    df = layer["df"]
-    xcol, ycol = layer["xcol"], layer["ycol"]
-    prop_cols = [c for c in df.columns if c not in (xcol, ycol)]
-
-    features = []
-    for row in df.itertuples(index=False):
-        rec = dict(zip(df.columns, row))
-        lon = _clean_value(rec[xcol])
-        lat = _clean_value(rec[ycol])
-        if lon is None or lat is None:
-            continue
-        props = {c: _clean_value(rec[c]) for c in prop_cols}
-        features.append({
-            "type": "Feature",
-            "geometry": {"type": "Point", "coordinates": [lon, lat]},
-            "properties": props,
-        })
-
-    fc = {"type": "FeatureCollection", "features": features}
-
-    if layer["crs"] not in ("EPSG:4326", "epsg:4326"):
-        code = layer["crs"].split(":")[-1]
-        fc["crs"] = {"type": "name",
-                     "properties": {"name": f"urn:ogc:def:crs:EPSG::{code}"}}
-    return fc
-
-
-def write_geojson(fc: dict, out_path: Path):
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(fc, f, ensure_ascii=False)
-    return out_path
-
-
-def _lazy_gpd():
-    try:
-        import geopandas as gpd  
-        return gpd
-    except ImportError as e:
-        raise SystemExit(
-            "This action needs geopandas. Install it with:\n"
-            "    pip install geopandas pyogrio --break-system-packages\n"
-            "(or use '-f geojson' for point CSVs, which needs only pandas)."
-        ) from e
-
-
-def point_layer_to_gdf(layer: dict, target_crs=None):
-    gpd = _lazy_gpd()
-    from shapely.geometry import Point
-    df = layer["df"]
-    xcol, ycol = layer["xcol"], layer["ycol"]
-    geom = [Point(xy) for xy in zip(df[xcol], df[ycol])]
-    gdf = gpd.GeoDataFrame(df.copy(), geometry=geom, crs=layer["crs"])
-    if target_crs and str(target_crs).lower() != str(layer["crs"]).lower():
-        gdf = gdf.to_crs(target_crs)
-    return gdf
-
-
-def load_vector_gdf(path: Path, target_crs=None):
-    gpd = _lazy_gpd()
-    gdf = gpd.read_file(path)
-    if gdf.crs is None:
-        print(f"    [warning] {path.name} has no CRS; assuming EPSG:4326")
-        gdf = gdf.set_crs("EPSG:4326")
-    if target_crs and str(gdf.crs).lower() != str(target_crs).lower():
-        gdf = gdf.to_crs(target_crs)
-    return gdf
-
-
-def describe_gdf(name, gdf):
-    geom_types = ", ".join(sorted(set(gdf.geom_type.dropna())))
-    print(f"    {name}: {len(gdf)} features | {geom_types} | CRS {gdf.crs}")
-
-
-def gather_inputs(paths):
-    """Expand dirs into files; classify each into 'csv' or 'vector'."""
+def gather_csvs(paths):
     files = []
     for p in paths:
         p = Path(p)
         if p.is_dir():
             files.extend(sorted(p.glob("*.csv")))
-            files.extend(sorted(p.glob("*.geojson")))
         elif p.exists():
             files.append(p)
         else:
@@ -197,103 +46,459 @@ def gather_inputs(paths):
     return files
 
 
-def run(inputs, out_path, fmt, target_crs, source_crs, lon_col, lat_col):
-    files = gather_inputs(inputs)
-    if not files:
-        raise SystemExit("No input files found.")
+def classify_csv(path: Path):
+    """Returns 'routes', 'stops' or None by looking only at the header."""
+    try:
+        header = pd.read_csv(path, nrows=0).columns
+    except Exception as e:
+        print(f"  [warning] could not read header of {path.name}: {e}")
+        return None
+    cols = set(header)
+    if ROUTE_MARKER_COLS.issubset(cols):
+        return "routes"
+    if STOP_MARKER_COLS.issubset(cols):
+        return "stops"
+    return None
 
-    print(f"Converting {len(files)} file(s) -> {fmt}")
 
-    # --- Pure GeoJSON fast path for point CSVs only ---------------------
-    only_csv = all(f.suffix.lower() == ".csv" for f in files)
-    if fmt == "geojson" and only_csv and str(target_crs) == DEFAULT_TARGET_CRS:
-        out_dir = Path(out_path)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        for f in files:
-            layer = load_point_csv(f, lon_col, lat_col, source_crs)
-            fc = point_layer_to_geojson(layer)
-            dest = write_geojson(fc, out_dir / f"{layer['name']}.geojson")
-            print(f"  wrote {dest}  ({len(fc['features'])} features)")
-        return
-
-    gpd = _lazy_gpd()
-    layers = {}
+def load_and_concat(files, kind):
+    frames = []
     for f in files:
-        if f.suffix.lower() == ".csv":
-            layer = load_point_csv(f, lon_col, lat_col, source_crs)
-            gdf = point_layer_to_gdf(layer, target_crs)
-            name = layer["name"]
-        elif f.suffix.lower() in VECTOR_EXTS:
-            gdf = load_vector_gdf(f, target_crs)
-            name = _safe_layer_name(f)
+        df = pd.read_csv(f)
+        frames.append(df)
+        print(f"  [{kind}] {f.name}: {len(df)} rows")
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True, sort=False)
+
+
+# --------------------------------------------------------------------------
+# Conversion to GeoDataFrame
+# --------------------------------------------------------------------------
+
+def routes_to_gdf(df: pd.DataFrame):
+    import geopandas as gpd
+    from shapely import wkt
+
+    df = df.copy()
+    before = len(df)
+    df = df.dropna(subset=["geometry_wkt"])
+    dropped = before - len(df)
+    if dropped:
+        print(f"    [info] {dropped} routes without geometry_wkt dropped")
+
+    geometry = df["geometry_wkt"].apply(wkt.loads)
+    df = df.drop(columns=["geometry_wkt"])
+    return gpd.GeoDataFrame(df, geometry=geometry, crs=DEFAULT_CRS)
+
+
+def stops_to_gdf(df: pd.DataFrame):
+    import geopandas as gpd
+    from shapely.geometry import Point
+
+    df = df.copy()
+    before = len(df)
+    df = df.dropna(subset=["latitude", "longitude"])
+    dropped = before - len(df)
+    if dropped:
+        print(f"    [info] {dropped} stops without lat/lon dropped")
+
+    geometry = [Point(xy) for xy in zip(df["longitude"], df["latitude"])]
+    return gpd.GeoDataFrame(df, geometry=geometry, crs=DEFAULT_CRS)
+
+
+# --------------------------------------------------------------------------
+# Deterministic color per route
+# --------------------------------------------------------------------------
+
+def route_color_rgb(route_id: str):
+    """Stable color (same route_id -> always the same color)."""
+    h = int(hashlib.md5(str(route_id).encode("utf-8")).hexdigest(), 16)
+    hue = (h % 360) / 360.0
+    r, g, b = colorsys.hsv_to_rgb(hue, 0.68, 0.88)
+    return f"{int(r * 255)},{int(g * 255)},{int(b * 255)},255"
+
+
+def model_color_rgb(model: str):
+    """A fixed color per model (for --no-by-route mode)."""
+    palette = {
+        "M1": "230,57,70,255",
+        "M2": "42,157,143,255",
+        "M3": "38,70,140,255",
+        "M4": "233,150,20,255",
+        "M5": "142,68,173,255",
+    }
+    return palette.get(model, FALLBACK_COLOR)
+
+
+# --------------------------------------------------------------------------
+# Building QML styles (categorized by route)
+# --------------------------------------------------------------------------
+
+def _escape(s: str) -> str:
+    return (
+        str(s)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def build_line_qml(route_ids_colors, by_route: bool, single_color: str):
+    """categorizedSymbol renderer (by route_id) or singleSymbol for lines."""
+    if not by_route:
+        return _single_symbol_qml_line(single_color)
+
+    symbols_xml = []
+    categories_xml = []
+    for idx, (rid, color) in enumerate(route_ids_colors):
+        sym_id = str(idx)
+        symbols_xml.append(_line_symbol_xml(sym_id, color))
+        categories_xml.append(
+            f'<category value="{_escape(rid)}" symbol="{sym_id}" '
+            f'render="true" label="{_escape(rid)}"/>'
+        )
+    # default symbol for unexpected values (NULL / other)
+    default_id = str(len(route_ids_colors))
+    symbols_xml.append(_line_symbol_xml(default_id, FALLBACK_COLOR))
+    categories_xml.append(
+        f'<category value="" symbol="{default_id}" render="true" label="other"/>'
+    )
+
+    return f"""<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
+<qgis version="3.34" styleCategories="Symbology">
+  <renderer-v2 type="categorizedSymbol" attr="{ROUTE_ID_COL}" symbollevels="0" enableorderby="0" forceraster="0">
+    <categories>
+      {''.join(categories_xml)}
+    </categories>
+    <symbols>
+      {''.join(symbols_xml)}
+    </symbols>
+  </renderer-v2>
+  <blendMode>0</blendMode>
+  <featureBlendMode>0</featureBlendMode>
+</qgis>"""
+
+
+def _single_symbol_qml_line(color: str):
+    return f"""<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
+<qgis version="3.34" styleCategories="Symbology">
+  <renderer-v2 type="singleSymbol" symbollevels="0" enableorderby="0" forceraster="0">
+    <symbols>
+      {_line_symbol_xml("0", color)}
+    </symbols>
+    <rotation/>
+    <sizescale/>
+  </renderer-v2>
+</qgis>"""
+
+
+def _line_symbol_xml(sym_id: str, color: str):
+    return f"""<symbol type="line" name="{sym_id}" alpha="1" force_rhr="0" clip_to_extent="1">
+        <layer class="SimpleLine" locked="0" pass="0" enabled="1">
+          <Option type="Map">
+            <Option type="QString" name="line_color" value="{color}"/>
+            <Option type="QString" name="line_width" value="{ROUTE_LINE_WIDTH_MM}"/>
+            <Option type="QString" name="line_width_unit" value="MM"/>
+            <Option type="QString" name="line_style" value="solid"/>
+            <Option type="QString" name="capstyle" value="round"/>
+            <Option type="QString" name="joinstyle" value="round"/>
+          </Option>
+        </layer>
+      </symbol>"""
+
+
+def build_point_qml(route_ids_colors, by_route: bool, single_color: str):
+    if not by_route:
+        return _single_symbol_qml_point(single_color)
+
+    symbols_xml = []
+    categories_xml = []
+    for idx, (rid, color) in enumerate(route_ids_colors):
+        sym_id = str(idx)
+        symbols_xml.append(_point_symbol_xml(sym_id, color, STOP_SIZE_MM))
+        categories_xml.append(
+            f'<category value="{_escape(rid)}" symbol="{sym_id}" '
+            f'render="true" label="{_escape(rid)}"/>'
+        )
+    default_id = str(len(route_ids_colors))
+    symbols_xml.append(_point_symbol_xml(default_id, FALLBACK_COLOR, STOP_SIZE_MM))
+    categories_xml.append(
+        f'<category value="" symbol="{default_id}" render="true" label="other"/>'
+    )
+
+    return f"""<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
+<qgis version="3.34" styleCategories="Symbology">
+  <renderer-v2 type="categorizedSymbol" attr="{ROUTE_ID_COL}" symbollevels="0" enableorderby="0" forceraster="0">
+    <categories>
+      {''.join(categories_xml)}
+    </categories>
+    <symbols>
+      {''.join(symbols_xml)}
+    </symbols>
+  </renderer-v2>
+</qgis>"""
+
+
+def _single_symbol_qml_point(color: str):
+    return f"""<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
+<qgis version="3.34" styleCategories="Symbology">
+  <renderer-v2 type="singleSymbol" symbollevels="0" enableorderby="0" forceraster="0">
+    <symbols>
+      {_point_symbol_xml("0", color, STOP_SIZE_MM)}
+    </symbols>
+    <rotation/>
+    <sizescale/>
+  </renderer-v2>
+</qgis>"""
+
+
+def _point_symbol_xml(sym_id: str, color: str, size_mm: float):
+    return f"""<symbol type="marker" name="{sym_id}" alpha="1" force_rhr="0" clip_to_extent="1">
+        <layer class="SimpleMarker" locked="0" pass="0" enabled="1">
+          <Option type="Map">
+            <Option type="QString" name="name" value="circle"/>
+            <Option type="QString" name="color" value="{color}"/>
+            <Option type="QString" name="outline_color" value="35,35,35,255"/>
+            <Option type="QString" name="outline_width" value="0.2"/>
+            <Option type="QString" name="outline_width_unit" value="MM"/>
+            <Option type="QString" name="size" value="{size_mm}"/>
+            <Option type="QString" name="size_unit" value="MM"/>
+            <Option type="QString" name="scale_method" value="area"/>
+          </Option>
+        </layer>
+      </symbol>"""
+
+
+# --------------------------------------------------------------------------
+# Writing to GeoPackage + embedded style (layer_styles table)
+# --------------------------------------------------------------------------
+
+def ensure_layer_styles_table(gpkg_path: Path):
+    con = sqlite3.connect(gpkg_path)
+    try:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS layer_styles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                f_table_catalog TEXT(256),
+                f_table_schema TEXT(256),
+                f_table_name TEXT(256),
+                f_geometry_column TEXT(256),
+                styleName TEXT(30),
+                styleQML TEXT,
+                styleSLD TEXT,
+                useAsDefault BOOLEAN,
+                description TEXT,
+                owner TEXT,
+                ui TEXT(30),
+                update_time DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def write_layer_style(gpkg_path: Path, layer_name: str, qml: str):
+    con = sqlite3.connect(gpkg_path)
+    try:
+        con.execute(
+            "DELETE FROM layer_styles WHERE f_table_name = ?", (layer_name,)
+        )
+        con.execute(
+            """
+            INSERT INTO layer_styles
+                (f_table_catalog, f_table_schema, f_table_name, f_geometry_column,
+                 styleName, styleQML, useAsDefault, description, owner)
+            VALUES ('', '', ?, 'geom', ?, ?, 1, 'auto-generated', '')
+            """,
+            (layer_name, f"{layer_name}_style", qml),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def route_palette(gdf, by_route: bool, model: str):
+    """Sorted list of unique [(route_id, color_rgb_str), ...]."""
+    if not by_route:
+        return []
+    ids = sorted(gdf[ROUTE_ID_COL].dropna().unique().tolist())
+    return [(rid, route_color_rgb(rid)) for rid in ids]
+
+
+def limit_routes_per_model(routes_df: pd.DataFrame, stops_df: pd.DataFrame, max_routes):
+    """Keep at most `max_routes` unique route_id values (and their matching stops).
+
+    Selection is deterministic (sorted route_id order), so repeated runs with the
+    same input produce the same sample. Pass max_routes=None to keep every route
+    (default behavior, unchanged from before).
+    """
+    if max_routes is None:
+        return routes_df, stops_df
+
+    available_ids = []
+    if len(routes_df) and ROUTE_ID_COL in routes_df.columns:
+        available_ids = sorted(routes_df[ROUTE_ID_COL].dropna().unique().tolist())
+    elif len(stops_df) and ROUTE_ID_COL in stops_df.columns:
+        available_ids = sorted(stops_df[ROUTE_ID_COL].dropna().unique().tolist())
+
+    if not available_ids:
+        return routes_df, stops_df
+
+    selected_ids = set(available_ids[:max_routes])
+    if len(selected_ids) < len(available_ids):
+        print(f"    [info] sampling {len(selected_ids)} of {len(available_ids)} routes")
+
+    routes_out = (
+        routes_df[routes_df[ROUTE_ID_COL].isin(selected_ids)]
+        if len(routes_df) and ROUTE_ID_COL in routes_df.columns
+        else routes_df
+    )
+    stops_out = (
+        stops_df[stops_df[ROUTE_ID_COL].isin(selected_ids)]
+        if len(stops_df) and ROUTE_ID_COL in stops_df.columns
+        else stops_df
+    )
+    return routes_out, stops_out
+
+
+def write_model_layers(gpkg_path: Path, model: str, routes_gdf, stops_gdf, by_route: bool):
+    layer_written = False
+
+    if routes_gdf is not None and len(routes_gdf):
+        name = f"{model}_routes"
+        routes_gdf.to_file(gpkg_path, layer=name, driver="GPKG")
+        palette = route_palette(routes_gdf, by_route, model)
+        qml = build_line_qml(palette, by_route, model_color_rgb(model))
+        ensure_layer_styles_table(gpkg_path)
+        write_layer_style(gpkg_path, name, qml)
+        print(f"    layer {name}: {len(routes_gdf)} routes"
+              f"{' (colored by route_id)' if by_route else ''}")
+        layer_written = True
+
+    if stops_gdf is not None and len(stops_gdf):
+        name = f"{model}_stops"
+        stops_gdf.to_file(gpkg_path, layer=name, driver="GPKG")
+        palette = route_palette(stops_gdf, by_route, model)
+        qml = build_point_qml(palette, by_route, model_color_rgb(model))
+        ensure_layer_styles_table(gpkg_path)
+        write_layer_style(gpkg_path, name, qml)
+        print(f"    layer {name}: {len(stops_gdf)} stops")
+        layer_written = True
+
+    return layer_written
+
+
+# --------------------------------------------------------------------------
+# Orchestration
+# --------------------------------------------------------------------------
+
+def run(inputs, out_dir: Path, by_route: bool, routes_per_model=None):
+    files = gather_csvs(inputs)
+    if not files:
+        raise SystemExit("No input CSV files found.")
+
+    route_files, stop_files, skipped = [], [], []
+    for f in files:
+        kind = classify_csv(f)
+        if kind == "routes":
+            route_files.append(f)
+        elif kind == "stops":
+            stop_files.append(f)
         else:
-            print(f"  [warning] unsupported extension, skipping: {f.name}")
+            skipped.append(f)
+
+    if skipped:
+        print("[info] ignored files (not recognized as routes or stops):")
+        for f in skipped:
+            print(f"    - {f.name}")
+
+    print(f"Route files: {len(route_files)} | Stop files: {len(stop_files)}")
+
+    routes_df = load_and_concat(route_files, "routes")
+    stops_df = load_and_concat(stop_files, "stops")
+
+    if routes_df.empty and stops_df.empty:
+        raise SystemExit("No route or stop data to export.")
+
+    experiment_ids = sorted(
+        set(routes_df.get(EXPERIMENT_COL, pd.Series(dtype=str)).dropna().unique().tolist())
+        | set(stops_df.get(EXPERIMENT_COL, pd.Series(dtype=str)).dropna().unique().tolist())
+    )
+    if not experiment_ids:
+        experiment_ids = ["default"]
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for exp_id in experiment_ids:
+        exp_routes = routes_df[routes_df.get(EXPERIMENT_COL) == exp_id] if not routes_df.empty else routes_df
+        exp_stops = stops_df[stops_df.get(EXPERIMENT_COL) == exp_id] if not stops_df.empty else stops_df
+
+        models = sorted(
+            set(exp_routes[MODEL_COL].dropna().unique().tolist() if not exp_routes.empty else [])
+            | set(exp_stops[MODEL_COL].dropna().unique().tolist() if not exp_stops.empty else [])
+        )
+        if not models:
+            print(f"[warning] experiment_id={exp_id}: no usable 'model' column, skipping")
             continue
-        layers[name] = gdf
-        describe_gdf(name, gdf)
 
-    if fmt == "gpkg":
-        out_path = Path(out_path)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        if out_path.exists():
-            out_path.unlink()  # start fresh so layers don't duplicate
-        for name, gdf in layers.items():
-            gdf.to_file(out_path, layer=name, driver="GPKG")
-        print(f"  wrote {out_path}  ({len(layers)} layer(s))")
+        gpkg_path = out_dir / f"{exp_id}.gpkg"
+        if gpkg_path.exists():
+            gpkg_path.unlink()
 
-    elif fmt == "geojson":
-        out_dir = Path(out_path)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        for name, gdf in layers.items():
-            dest = out_dir / f"{name}.geojson"
-            gdf.to_file(dest, driver="GeoJSON")
-            print(f"  wrote {dest}")
+        print(f"\n=== experiment_id={exp_id} -> {gpkg_path.name} ===")
+        for model in models:
+            m_routes = exp_routes[exp_routes[MODEL_COL] == model] if not exp_routes.empty else exp_routes
+            m_stops = exp_stops[exp_stops[MODEL_COL] == model] if not exp_stops.empty else exp_stops
+            m_routes, m_stops = limit_routes_per_model(m_routes, m_stops, routes_per_model)
 
-    elif fmt == "shapefile":
-        out_dir = Path(out_path)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        print("  [warning] Shapefile truncates field names to 10 chars "
-              "and splits into several files; prefer gpkg if possible.")
-        for name, gdf in layers.items():
-            dest = out_dir / f"{name}.shp"
-            gdf.to_file(dest, driver="ESRI Shapefile")
-            print(f"  wrote {dest}")
+            routes_gdf = routes_to_gdf(m_routes) if len(m_routes) else None
+            stops_gdf = stops_to_gdf(m_stops) if len(m_stops) else None
+
+            print(f"  model {model}:")
+            write_model_layers(gpkg_path, model, routes_gdf, stops_gdf, by_route)
+
+        print(f"  written: {gpkg_path}")
 
 
 def parse_args():
-    ap = argparse.ArgumentParser(description="Convert GLIMS results / geodata to QGIS formats.")
+    ap = argparse.ArgumentParser(
+        description="Exports routes (linestrings) and stops (points) to per-model "
+                    "GeoPackages, ready for QGIS with embedded styling."
+    )
     ap.add_argument("inputs", nargs="*",
-                    help="CSV point files, vector files, or directories "
-                         f"(default: {DEFAULT_INPUT_DIR}).")
-    ap.add_argument("-o", "--output",
-                    help="Output .gpkg file (for -f gpkg) or output directory "
-                         "(for geojson/shapefile).")
-    ap.add_argument("-f", "--format", choices=["gpkg", "geojson", "shapefile"],
-                    default="gpkg", help="Output format (default: gpkg).")
-    ap.add_argument("--target-crs", default=DEFAULT_TARGET_CRS,
-                    help="CRS of the output (default: EPSG:4326 / WGS84).")
-    ap.add_argument("--source-crs", default=DEFAULT_SOURCE_CRS,
-                    help="CRS to assume for x/y columns lacking lon/lat "
-                         f"(default: {DEFAULT_SOURCE_CRS}).")
-    ap.add_argument("--lon-col", help="Force the longitude column name.")
-    ap.add_argument("--lat-col", help="Force the latitude column name.")
+                     help="Route/stop CSVs or folders containing them "
+                          f"(default: {DEFAULT_INPUT_DIR}).")
+    ap.add_argument("-o", "--output-dir",
+                     help=f"Output folder (default: {DEFAULT_OUTPUT_DIR}).")
+    ap.add_argument("--by-route", dest="by_route", action="store_true", default=True,
+                     help="Color each route differently within each model layer "
+                          "(default).")
+    ap.add_argument("--no-by-route", dest="by_route", action="store_false",
+                     help="A single color per model, without differentiating routes.")
+    ap.add_argument("--routes-per-model", type=int, default=None, metavar="N",
+                     help="If set, keep at most N routes per model (and their "
+                          "matching stops) instead of all of them — e.g. "
+                          "--routes-per-model 5 for a quick preview. The N routes "
+                          "are chosen deterministically (sorted route_id), so the "
+                          "same sample is produced on every run. Default: show all "
+                          "routes.")
     args = ap.parse_args()
 
     if not args.inputs:
         args.inputs = [str(DEFAULT_INPUT_DIR)]
-    if not args.output:
-        if args.format == "gpkg":
-            args.output = str(DEFAULT_OUTPUT_DIR / f"{CITY}.gpkg")
-        else:
-            args.output = str(DEFAULT_OUTPUT_DIR)
+    args.output_dir = Path(args.output_dir) if args.output_dir else DEFAULT_OUTPUT_DIR
     return args
 
 
 def main():
     a = parse_args()
-    run(a.inputs, a.output, a.format, a.target_crs, a.source_crs,
-        a.lon_col, a.lat_col)
-    print("Done.")
+    run(a.inputs, a.output_dir, a.by_route, a.routes_per_model)
+    print("\nDone.")
 
 
 if __name__ == "__main__":

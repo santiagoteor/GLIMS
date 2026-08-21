@@ -13,8 +13,8 @@ from code.common.paths import DATA_DIR
 RAW_DATA_DIR = DATA_DIR.parent / "raw_data"
 
 ADMIN_LEVELS = {
-    "9": ("district", "limites_distritos"),
-    "10": ("neighborhood", "limites_barrios"),
+    "9": ("district", "districts_limits"),
+    "10": ("neighborhood", "neighborhoods_limits"),
 }
 
 EXPECTED_COUNTS = {
@@ -134,8 +134,8 @@ def fetch_boundaries(cities: list[str], raw_data_dir: Path) -> None:
 # STEP 2 — Combine districts + neighborhoods into a single zones file
 
 SOURCES = {
-    "limites_distritos": "district",
-    "limites_barrios": "neighborhood",
+    "districts_limits": "district",
+    "neighborhoods_limits": "neighborhood",
 }
 
 

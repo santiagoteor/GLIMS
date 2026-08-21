@@ -12,14 +12,10 @@ import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point
 
-
 CITY = "barcelona"
 
-
-BASE_DIR = Path(__file__).resolve().parent
-GLIMS_DIR = BASE_DIR.parent.parent
-RAW_DATA_DIR = GLIMS_DIR / "raw_data"
-DEFAULT_CONFIG = GLIMS_DIR / "configs" / "demand" / "demand_generation.json"
+from code.common.paths import PROJECT_ROOT, DATA_DIR, RAW_DATA_DIR, RESULTS_DIR
+DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "demand" / "demand_generation.json"
 
 RANDOM_SEED = 42
 
@@ -351,8 +347,7 @@ CITY_CONFIGS = {
     "barcelona": {
         "addresses_path": RAW_DATA_DIR / "adreces_postals_elementals.csv",
         "population_path": RAW_DATA_DIR / "2026_pad_mdbas.csv",
-        "results_dir": GLIMS_DIR / "results" / "barcelona" / "demand",
-        "load_addresses": load_addresses_barcelona,
+        "results_dir": RESULTS_DIR / "barcelona" / "demand",        "load_addresses": load_addresses_barcelona,
         "load_population": lambda path: load_population_barcelona(path),
         "rename_out": {"census_section": "seccio_censal", "section_population": "poblacion_seccion"},
         "master_cols": [
@@ -370,7 +365,7 @@ CITY_CONFIGS = {
     "madrid": {
         "addresses_path": RAW_DATA_DIR / "madrid_direcciones_postales.csv",
         "population_path": RAW_DATA_DIR / "madrid_poblacion.csv",
-        "results_dir": GLIMS_DIR / "results" / "madrid" / "demand",
+        "results_dir": RESULTS_DIR / "madrid" / "demand",        
         "load_addresses": load_addresses_madrid,
         "load_population": lambda path: load_population_ine(path, "28079"),
         "rename_out": {},
@@ -389,9 +384,9 @@ CITY_CONFIGS = {
         ],
     },
     "valencia": {
-        "addresses_path": GLIMS_DIR / "data" / "valencia" / "direcciones_valencia.csv",
-        "population_path": GLIMS_DIR / "raw_data" / "Valencia" / "valencia_poblacion.csv",
-        "results_dir": GLIMS_DIR / "results" / "valencia" / "demand",
+        "addresses_path": DATA_DIR / "valencia" / "direcciones_valencia.csv",
+        "population_path": RAW_DATA_DIR / "Valencia" / "valencia_poblacion.csv",
+        "results_dir": RESULTS_DIR / "valencia" / "demand",
         "load_addresses": load_addresses_valencia,
         "load_population": lambda path: load_population_ine(path, "46250"),
         "rename_out": {},
