@@ -30,6 +30,16 @@ class RoutingExperimentConfig:
 
 
 @dataclass(frozen=True)
+class LastMeterAccessExperimentConfig:
+    enabled: bool = False
+    walking_speed_m_s: float = 1.2
+    round_trip: bool = True
+    models: list[str] | None = field(
+        default_factory=lambda: ["M1", "M2"]
+    )
+
+
+@dataclass(frozen=True)
 class TrafficExperimentConfig:
     static_profile: str = "baseline"
     static_multiplier_override: float | None = None
@@ -85,6 +95,9 @@ class ExperimentConfig:
     routing: RoutingExperimentConfig = field(
         default_factory=RoutingExperimentConfig
     )
+    last_meter_access: LastMeterAccessExperimentConfig = field(
+        default_factory=LastMeterAccessExperimentConfig
+    )
     traffic: TrafficExperimentConfig = field(
         default_factory=TrafficExperimentConfig
     )
@@ -136,6 +149,9 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         ),
         osrm_profile=str(raw.get("osrm_profile", "driving")),
         routing=RoutingExperimentConfig(**raw.get("routing", {})),
+        last_meter_access=LastMeterAccessExperimentConfig(
+            **raw.get("last_meter_access", {})
+        ),
         traffic=TrafficExperimentConfig(**raw.get("traffic", {})),
         facility_filter=FacilityFilterExperimentConfig(
             **raw.get("facility_filter", {})
@@ -291,6 +307,29 @@ def validate_experiment_config(config: ExperimentConfig) -> None:
             "supply_arrival_margin_min must be smaller than "
             "traffic.shift_duration_min."
         )
+    if config.last_meter_access.walking_speed_m_s <= 0:
+        raise ValueError(
+            "last_meter_access.walking_speed_m_s must be greater than zero."
+        )
+    last_meter_models = config.last_meter_access.models
+    if last_meter_models is not None:
+        if not isinstance(last_meter_models, list):
+            raise ValueError(
+                "last_meter_access.models must be a list of model codes or null."
+            )
+        allowed_models = {"M1", "M2", "M3", "M4", "M5"}
+        normalized_models = [str(model).upper() for model in last_meter_models]
+        invalid_models = sorted(set(normalized_models) - allowed_models)
+        if invalid_models:
+            raise ValueError(
+                "Unsupported last_meter_access.models values: "
+                f"{invalid_models}. Expected M1-M5."
+            )
+        if len(set(normalized_models)) != len(normalized_models):
+            raise ValueError(
+                "last_meter_access.models cannot contain duplicates."
+            )
+
     if config.facility_filter.initial_buffer_m < 0:
         raise ValueError(
             "facility_filter.initial_buffer_m cannot be negative."
@@ -474,6 +513,7 @@ def resolve_experiment_config(
             base.osrm_profile,
         ),
         routing=routing,
+        last_meter_access=base.last_meter_access,
         traffic=traffic,
         output=output,
         facility_filter=base.facility_filter,

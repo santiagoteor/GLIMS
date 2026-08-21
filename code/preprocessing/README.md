@@ -1,8 +1,25 @@
 # GLIMS Preprocessing Scripts
 
-This document provides script-level documentation for the preprocessing utilities used by GLIMS. It complements the project-level [`README.md`](../../README.md), which describes the complete simulation workflow, methodology, experiment configuration, routing algorithms, and outputs.
+This document provides script-level documentation for the preprocessing
+utilities located in `code/preprocessing/`.
 
-The scripts documented here focus on preparing administrative boundaries, postal-address data, and reproducible demand instances. A QGIS export utility currently located in the same folder is documented separately at the end because it is a post-processing tool rather than a preprocessing dependency.
+It complements the project-level documentation by focusing on the individual
+scripts, including their purpose, required inputs, processing workflow,
+command-line usage, dependencies, and generated outputs.
+
+For the role of preprocessing within the complete GLIMS data pipeline, see:
+
+→ [Data and Preprocessing](../../docs/data-and-preprocessing.md)
+
+For the general project architecture, logistics models, installation, and
+quick-start instructions, see:
+
+→ [GLIMS README](../../README.md)
+
+The scripts documented here focus primarily on preparing administrative
+boundaries, postal-address data, and reproducible demand instances. Utilities
+located in this directory that serve post-processing or experimental workflows
+are identified explicitly where applicable.
 
 ## Overview
 
@@ -604,18 +621,27 @@ QGIS
 
 ## Relationship with the Main Documentation
 
-This README intentionally focuses on script-level behavior and data dependencies.
+This README intentionally focuses on script-level behavior, input
+requirements, generated outputs, and implementation dependencies.
 
-For the following topics, refer to the project-level [`README.md`](../../README.md):
+For the broader preprocessing workflow and the role of these datasets within
+GLIMS, see:
 
--   GLIMS architecture and complete workflow;
--   logistics models M1--M5;
--   methodological demand-generation assumptions;
--   facility preprocessing and classification;
--   OSRM integration;
--   CWS and ILS routing algorithms;
--   experiment configuration;
--   running simulations; and
--   interpreting and validating experiment outputs.
+→ [Data and Preprocessing](../../docs/data-and-preprocessing.md)
 
-Keeping these two documentation levels separate avoids duplicating methodological explanations while preserving the implementation details required to maintain and reproduce the preprocessing pipeline.
+Other technical topics are documented separately under `docs/`:
+
+- [Demand Generation](../../docs/demand-generation.md)
+- [Routing and OSRM](../../docs/routing-and-osrm.md)
+- [Experiment Configuration](../../docs/experiment-configuration.md)
+- [Routing Algorithms](../../docs/routing-algorithms.md)
+- [Running GLIMS](../../docs/running-glims.md)
+- [Outputs and Results](../../docs/outputs-and-results.md)
+
+For the project overview, architecture, logistics models, installation, and
+quick-start workflow, see the project-level
+[README](../../README.md).
+
+Keeping these documentation levels separate avoids duplicating methodological
+explanations while preserving the implementation details required to maintain
+and reproduce the preprocessing pipeline.

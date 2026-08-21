@@ -208,6 +208,13 @@ def simulate_neighborhood(
             shift_end=shift_end,
             show_progress=show_progress,
             exclude_unroutable_clients=True,
+            last_meter_access_enabled=(
+                routing_config.last_meter_applies_to("M1")
+            ),
+            last_meter_walking_speed_m_s=(
+                routing_config.last_meter_walking_speed_m_s
+            ),
+            last_meter_round_trip=routing_config.last_meter_round_trip,
         )
 
     # Apply the M1 driving-routability exclusion consistently to all models.
@@ -254,7 +261,11 @@ def simulate_neighborhood(
     m1_capacity = float(parameters["FURGONETA_CONV"]["capacidad"])
     m2_capacity = float(parameters["FURGONETA_ELEC"]["capacidad"])
 
-    direct_routing_reusable = abs(m1_capacity - m2_capacity) <= 1e-9
+    direct_routing_reusable = (
+        abs(m1_capacity - m2_capacity) <= 1e-9
+        and routing_config.last_meter_applies_to("M1")
+        == routing_config.last_meter_applies_to("M2")
+    )
 
     print(
         "M2 routing reuse check: "
@@ -317,6 +328,13 @@ def simulate_neighborhood(
                 shift_start=shift_start,
                 shift_end=shift_end,
                 show_progress=show_progress,
+                last_meter_access_enabled=(
+                    routing_config.last_meter_applies_to("M2")
+                ),
+                last_meter_walking_speed_m_s=(
+                    routing_config.last_meter_walking_speed_m_s
+                ),
+                last_meter_round_trip=routing_config.last_meter_round_trip,
             )
 
         # Direct models have no separate trunk leg: CWS includes CC departures/returns.
@@ -437,6 +455,7 @@ def simulate_neighborhood(
             city,
             assigned_pudos,
             neighborhood_name,
+            routing_config=routing_config,
         )
 
     print(f"Demand: {customer_count} customers, {package_count} packages")
@@ -613,6 +632,25 @@ def simulate_neighborhood(
             customer_route_audit_rows=customer_route_audit_rows,
         )
 
+    m3_last_meter_access_km = float(
+        sum(float(row.get("last_meter_access_distance_km", 0.0) or 0.0) for row in m3_bike_detail_rows)
+    )
+    m3_last_meter_access_time_min = float(
+        sum(float(row.get("last_meter_access_time_min", 0.0) or 0.0) for row in m3_bike_detail_rows)
+    )
+    m4_last_meter_access_km = float(
+        sum(float(row.get("last_meter_access_distance_km", 0.0) or 0.0) for row in m4_walking_detail_rows)
+    )
+    m4_last_meter_access_time_min = float(
+        sum(float(row.get("last_meter_access_time_min", 0.0) or 0.0) for row in m4_walking_detail_rows)
+    )
+    m5_last_meter_access_km = float(
+        sum(float(row.get("last_meter_access_distance_km", 0.0) or 0.0) for row in m5_customer_detail_rows)
+    )
+    m5_last_meter_access_time_min = float(
+        sum(float(row.get("last_meter_access_time_min", 0.0) or 0.0) for row in m5_customer_detail_rows)
+    )
+
     audit_details = {
         "customer_route_audit": customer_route_audit_rows,
         "route_customer_summary": route_customer_summary_rows,
@@ -653,6 +691,8 @@ def simulate_neighborhood(
                 bike_distance_km=m3_bike_distance_km,
                 bike_duration_min=m3_bike_duration_min,
                 bike_route_count=m3_bike_route_count,
+                last_meter_access_km=m3_last_meter_access_km,
+                last_meter_access_time_min=m3_last_meter_access_time_min,
                 parameters=parameters,
                 cost_parameters=cost_parameters,
             ),
@@ -667,6 +707,8 @@ def simulate_neighborhood(
                 walking_distance_km=m4_distance_km,
                 walking_duration_min=m4_duration_min,
                 walking_route_count=m4_route_count,
+                last_meter_access_km=m4_last_meter_access_km,
+                last_meter_access_time_min=m4_last_meter_access_time_min,
                 parameters=parameters,
                 cost_parameters=cost_parameters,
             ),
@@ -681,6 +723,8 @@ def simulate_neighborhood(
                 supply_plan=pudo_supply_plan,
                 customer_travel_km=customer_travel_km,
                 customer_travel_min=customer_travel_min,
+                last_meter_access_km=m5_last_meter_access_km,
+                last_meter_access_time_min=m5_last_meter_access_time_min,
                 parameters=parameters,
                 cost_parameters=cost_parameters,
             ),

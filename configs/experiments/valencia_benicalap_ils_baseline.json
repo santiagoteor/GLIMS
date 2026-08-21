@@ -60,5 +60,11 @@
   "osrm_cache": {
     "enabled": true,
     "directory": ".glims_cache/osrm"
+  },
+  "last_meter_access": {
+    "enabled": true,
+    "walking_speed_m_s": 1.2,
+    "round_trip": true,
+    "models": ["M1", "M2", "M3", "M4"]
   }
 }

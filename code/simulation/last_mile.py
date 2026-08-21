@@ -7,6 +7,7 @@ from code.common.constants import BIKE_PREPARATION_TIME_PER_ROUTE_MIN, WALKING_P
 from code.common.data_utils import validate_required_columns
 from code.routing.config import RoutingAlgorithmConfig
 from code.routing.osrm_router import CapacityAwareOsrmRouter
+from code.routing.last_meter import build_last_meter_access_metrics
 from code.simulation.exporters import build_route_detail_rows
 from code.simulation.zones import group_customers_by_facility
 
@@ -15,6 +16,8 @@ def calculate_customer_collection_travel(
     city: str,
     assigned_pudos: pd.DataFrame,
     neighborhood_name: str,
+    *,
+    routing_config: RoutingAlgorithmConfig,
 ) -> tuple[float, float, list[dict]]:
     """
     Calculate one customer round trip to the assigned PUDO.
@@ -60,6 +63,14 @@ def calculate_customer_collection_travel(
             clients=customer_locations,
             transport_mode="walking",
         )
+        last_meter_metrics = build_last_meter_access_metrics(
+            city=city,
+            transport_mode="walking",
+            clients=customer_locations,
+            enabled=routing_config.last_meter_applies_to("M5"),
+            walking_speed_m_s=routing_config.last_meter_walking_speed_m_s,
+            round_trip=routing_config.last_meter_round_trip,
+        )
 
         for customer_offset, customer in customers.reset_index(drop=True).iterrows():
             matrix_index = customer_offset + 1
@@ -67,10 +78,22 @@ def calculate_customer_collection_travel(
                 distance_matrix[0, matrix_index]
                 + distance_matrix[matrix_index, 0]
             )
-            duration_min = float(
+            network_distance_km = distance_km
+            network_duration_min = float(
                 duration_matrix[0, matrix_index]
                 + duration_matrix[matrix_index, 0]
             )
+            access_distance_km = float(
+                last_meter_metrics.access_distance_m[customer_offset] / 1000.0
+            )
+            access_time_min = float(
+                last_meter_metrics.access_time_min[customer_offset]
+            )
+            snap_distance_m = float(
+                last_meter_metrics.snap_distance_m[customer_offset]
+            )
+            distance_km = network_distance_km + access_distance_km
+            duration_min = network_duration_min + access_time_min
             total_distance_km += distance_km
             total_duration_min += duration_min
             detail_rows.append(
@@ -89,10 +112,16 @@ def calculate_customer_collection_travel(
                     "stop_count": 1,
                     "package_load": float(customer["Demand"]),
                     "vehicle_capacity": np.nan,
-                    "distance_km": distance_km,
+                    "distance_km": network_distance_km,
+                    "network_distance_km": network_distance_km,
+                    "last_meter_access_distance_km": access_distance_km,
+                    "system_distance_km": distance_km,
                     "duration_min": duration_min,
+                    "network_duration_min": network_duration_min,
+                    "last_meter_access_time_min": access_time_min,
                     "start_handling_min": 0.0,
-                    "stop_service_min": 0.0,
+                    "base_stop_service_min": 0.0,
+                    "stop_service_min": access_time_min,
                     "stop_sequence": str(
                         customer.get("customer_id", customer_offset + 1)
                     ),
@@ -113,11 +142,18 @@ def calculate_customer_collection_travel(
                     "_stop_package_loads": [
                         float(customer["Demand"])
                     ],
+                    "_stop_snap_distances_m": [snap_distance_m],
+                    "_stop_last_meter_access_distances_m": [
+                        access_distance_km * 1000.0
+                    ],
+                    "_stop_last_meter_access_times_min": [access_time_min],
+                    "_stop_base_service_times_min": [0.0],
+                    "_stop_effective_service_times_min": [access_time_min],
                     "_stop_arrival_offsets_min": [
                         float(duration_matrix[0, matrix_index])
                     ],
                     "_stop_service_end_offsets_min": [
-                        float(duration_matrix[0, matrix_index])
+                        float(duration_matrix[0, matrix_index] + access_time_min)
                     ],
                 }
             )
@@ -229,6 +265,13 @@ def calculate_microhub_last_mile(
             ils_random_seed=routing_config.ils_random_seed,
             profiling_callback=_m3_profile_callback,
             show_progress=show_progress,
+            last_meter_access_enabled=(
+                routing_config.last_meter_applies_to("M3")
+            ),
+            last_meter_walking_speed_m_s=(
+                routing_config.last_meter_walking_speed_m_s
+            ),
+            last_meter_round_trip=routing_config.last_meter_round_trip,
         )
 
         total_distance += plan.total_distance_km
@@ -383,6 +426,13 @@ def calculate_pudo_last_mile(
             ils_relocate_max_insertions=routing_config.ils_relocate_max_insertions,
             ils_random_seed=routing_config.ils_random_seed,
             show_progress=show_progress,
+            last_meter_access_enabled=(
+                routing_config.last_meter_applies_to("M4")
+            ),
+            last_meter_walking_speed_m_s=(
+                routing_config.last_meter_walking_speed_m_s
+            ),
+            last_meter_round_trip=routing_config.last_meter_round_trip,
         )
 
         total_distance += plan.total_distance_km

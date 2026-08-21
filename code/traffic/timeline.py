@@ -44,8 +44,29 @@ def evaluate_route_timeline(
     traffic_zone: str | None,
     service_time_per_stop_min: float,
     route_preparation_time_min: float,
+    service_time_by_node_min: np.ndarray | None = None,
 ) -> RouteTimeline:
-    """Evaluate one completed route sequentially using departure-time traffic."""
+    """Evaluate one completed route sequentially using departure-time traffic.
+
+    ``service_time_by_node_min`` optionally overrides the scalar service time
+    for individual client matrix indices while keeping index 0 reserved for
+    the depot. This is used for customer-specific last-meter access penalties.
+    """
+
+    service_by_node = None
+    if service_time_by_node_min is not None:
+        service_by_node = np.asarray(service_time_by_node_min, dtype=float)
+        if service_by_node.ndim != 1 or len(service_by_node) < 1:
+            raise ValueError("service_time_by_node_min must be a 1-D array.")
+
+    def _service_time(node_index: int) -> float:
+        if service_by_node is None:
+            return float(service_time_per_stop_min)
+        if not 0 <= int(node_index) < len(service_by_node):
+            raise ValueError(
+                f"Missing service time for matrix node {node_index}."
+            )
+        return float(service_by_node[int(node_index)])
 
     current_time = route_start + timedelta(
         minutes=float(route_preparation_time_min)
@@ -81,9 +102,9 @@ def evaluate_route_timeline(
         current_time = arrival_time
 
         if destination != 0:
-            current_time += timedelta(minutes=float(service_time_per_stop_min))
+            current_time += timedelta(minutes=_service_time(destination))
 
-    stop_service_time = len(route) * float(service_time_per_stop_min)
+    stop_service_time = float(sum(_service_time(node) for node in route))
     preparation_time = float(route_preparation_time_min)
     total_duration = adjusted_travel_time + stop_service_time + preparation_time
 
