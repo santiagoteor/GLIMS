@@ -1,11 +1,12 @@
 # download_portals_valencia.py
+import sys
 import requests, json, time
 
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
-GLIMS_DIR = BASE_DIR.parent.parent
-DATA_DIR = GLIMS_DIR / "data" / "valencia"
+from code.common.paths import DATA_DIR
+
+VALENCIA_DATA_DIR = DATA_DIR / "valencia"
 
 BASE = (
     "https://geoportal.valencia.es/server/rest/services/"
