@@ -14,7 +14,7 @@ def load_city_data(
     city_folder = DATA_DIR / city
 
     centers_path = city_folder / "centros_cc.csv"
-    boundaries_path = city_folder / "limites_zonas.geojson"
+    boundaries_path = city_folder / "zones_limits.geojson"
     parameters_path = DATA_DIR / "model_parameters.csv"
 
     required_paths = {

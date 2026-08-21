@@ -18,6 +18,9 @@ COMPACT_COLUMNS = [
     "tipo_punto_ultima_milla",
     "numero_puntos_ultima_milla_usados",
     "km_recorridos",
+    "network_km",
+    "last_meter_access_km",
+    "last_meter_access_time_min",
     "numero_viajes",
     "emisiones_co2_kg",
     "emisiones_nox_kg",
@@ -296,7 +299,24 @@ def build_summary_export(
 
     for row_index, row in output.iterrows():
         model_code = str(row.get("model_code", "")).strip()
+        neighborhood_name = str(row.get("barrio", "")).strip()
         detail = model_details.get(model_code)
+
+        # ``model_details`` contains the concatenated routes of every simulated
+        # neighborhood. Summary timing metrics are neighborhood-level, so each
+        # result row must be evaluated only against its own route-detail rows.
+        # Without this filter, every neighborhood of a given model receives the
+        # same city-wide first departure / last completion timestamps.
+        if (
+            detail is not None
+            and not detail.empty
+            and "neighborhood" in detail.columns
+        ):
+            detail = detail.loc[
+                detail["neighborhood"].astype(str).str.strip().eq(
+                    neighborhood_name
+                )
+            ].copy()
 
         # M5 ends operationally when the operator completes PUDO supply.
         # Customer collection remains outside the controlled system timeline.

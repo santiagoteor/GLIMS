@@ -63,5 +63,11 @@
     "audit_detail": "summary",
     "performance_profile": "basic",
     "show_progress": true
+  },
+  "last_meter_access": {
+    "enabled": true,
+    "walking_speed_m_s": 1.2,
+    "round_trip": true,
+    "models": ["M1", "M2", "M3", "M4"]
   }
 }

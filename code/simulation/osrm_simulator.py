@@ -309,6 +309,16 @@ def _run_resolved_config(config: ExperimentConfig) -> None:
             config.routing.last_service_deadline_enabled
         ),
         last_service_margin_min=config.routing.last_service_margin_min,
+        last_meter_access_enabled=config.last_meter_access.enabled,
+        last_meter_walking_speed_m_s=(
+            config.last_meter_access.walking_speed_m_s
+        ),
+        last_meter_round_trip=config.last_meter_access.round_trip,
+        last_meter_models=(
+            tuple(config.last_meter_access.models)
+            if config.last_meter_access.models
+            else None
+        ),
     )
 
     try:

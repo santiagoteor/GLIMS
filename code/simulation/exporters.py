@@ -33,6 +33,11 @@ ROUTING_PLAN_METRIC_COLUMNS = (
     "unroutable_customer_count",
     "unroutable_package_count",
     "unroutable_customer_ids",
+    "last_meter_access_enabled",
+    "last_meter_walking_speed_m_s",
+    "last_meter_round_trip",
+    "total_last_meter_access_distance_km",
+    "total_last_meter_access_time_min",
 )
 
 INTERNAL_ROUTE_EXPORT_COLUMNS = (
@@ -40,6 +45,11 @@ INTERNAL_ROUTE_EXPORT_COLUMNS = (
     "_stop_latitudes",
     "_stop_longitudes",
     "_stop_package_loads",
+    "_stop_snap_distances_m",
+    "_stop_last_meter_access_distances_m",
+    "_stop_last_meter_access_times_min",
+    "_stop_base_service_times_min",
+    "_stop_effective_service_times_min",
     "_stop_arrival_offsets_min",
     "_stop_service_end_offsets_min",
 )
@@ -144,6 +154,19 @@ def build_route_stops_frame(
             latitudes = route_row.get("_stop_latitudes", [])
             longitudes = route_row.get("_stop_longitudes", [])
             package_loads = route_row.get("_stop_package_loads", [])
+            snap_distances = route_row.get("_stop_snap_distances_m", [])
+            access_distances = route_row.get(
+                "_stop_last_meter_access_distances_m", []
+            )
+            access_times = route_row.get(
+                "_stop_last_meter_access_times_min", []
+            )
+            base_service_times = route_row.get(
+                "_stop_base_service_times_min", []
+            )
+            effective_service_times = route_row.get(
+                "_stop_effective_service_times_min", []
+            )
             arrival_offsets = route_row.get(
                 "_stop_arrival_offsets_min", []
             )
@@ -232,6 +255,31 @@ def build_route_stops_frame(
                             package_loads[position - 1]
                             if position <= len(package_loads)
                             else ""
+                        ),
+                        "snap_distance_m": (
+                            snap_distances[position - 1]
+                            if position <= len(snap_distances)
+                            else 0.0
+                        ),
+                        "last_meter_access_distance_m": (
+                            access_distances[position - 1]
+                            if position <= len(access_distances)
+                            else 0.0
+                        ),
+                        "last_meter_access_time_min": (
+                            access_times[position - 1]
+                            if position <= len(access_times)
+                            else 0.0
+                        ),
+                        "base_service_time_min": (
+                            base_service_times[position - 1]
+                            if position <= len(base_service_times)
+                            else 0.0
+                        ),
+                        "effective_service_time_min": (
+                            effective_service_times[position - 1]
+                            if position <= len(effective_service_times)
+                            else 0.0
                         ),
                         "arrival_datetime": arrival_datetime,
                         "service_start_datetime": (
@@ -543,6 +591,32 @@ def build_route_detail_rows(
             if "Demand" in client_rows.columns
             else [0.0] * len(route)
         )
+        stop_snap_distances_m = [
+            float(plan.client_snap_distances_m[node - 1])
+            if len(plan.client_snap_distances_m) >= node else 0.0
+            for node in route
+        ]
+        stop_access_distances_m = [
+            float(plan.client_last_meter_access_distances_m[node - 1])
+            if len(plan.client_last_meter_access_distances_m) >= node else 0.0
+            for node in route
+        ]
+        stop_access_times_min = [
+            float(plan.client_last_meter_access_times_min[node - 1])
+            if len(plan.client_last_meter_access_times_min) >= node else 0.0
+            for node in route
+        ]
+        stop_base_service_times_min = [
+            float(SERVICE_TIME_PER_STOP_MIN) for _ in route
+        ]
+        stop_effective_service_times_min = [
+            float(SERVICE_TIME_PER_STOP_MIN + access_time)
+            for access_time in stop_access_times_min
+        ]
+        route_access_distance_km = float(sum(stop_access_distances_m) / 1000.0)
+        route_access_time_min = float(sum(stop_access_times_min))
+        network_distance_km = float(plan.route_distances_km[route_number - 1])
+        system_distance_km = network_distance_km + route_access_distance_km
         arrival_offsets = (
             plan.route_stop_arrival_offsets_min[route_number - 1]
             if len(plan.route_stop_arrival_offsets_min) >= route_number
@@ -573,10 +647,27 @@ def build_route_detail_rows(
                 "stop_count": len(route),
                 "package_load": plan.route_loads[route_number - 1],
                 "vehicle_capacity": plan.vehicle_capacity,
-                "distance_km": plan.route_distances_km[route_number - 1],
+                "distance_km": network_distance_km,
+                "network_distance_km": network_distance_km,
+                "last_meter_access_distance_km": route_access_distance_km,
+                "system_distance_km": system_distance_km,
                 "duration_min": plan.route_durations_min[route_number - 1],
                 "start_handling_min": plan.route_start_time_per_route_min,
-                "stop_service_min": len(route) * SERVICE_TIME_PER_STOP_MIN,
+                "base_stop_service_min": len(route) * SERVICE_TIME_PER_STOP_MIN,
+                "last_meter_access_time_min": route_access_time_min,
+                "stop_service_min": (
+                    len(route) * SERVICE_TIME_PER_STOP_MIN
+                    + route_access_time_min
+                ),
+                "last_meter_access_enabled": plan.last_meter_access_enabled,
+                "last_meter_walking_speed_m_s": plan.last_meter_walking_speed_m_s,
+                "last_meter_round_trip": plan.last_meter_round_trip,
+                "total_last_meter_access_distance_km": (
+                    plan.total_last_meter_access_distance_km
+                ),
+                "total_last_meter_access_time_min": (
+                    plan.total_last_meter_access_time_min
+                ),
                 "routing_algorithm": plan.routing_algorithm,
                 "routing_runtime_seconds": plan.routing_runtime_seconds,
                 "initial_distance_km": plan.initial_distance_km,
@@ -643,6 +734,11 @@ def build_route_detail_rows(
                 "_stop_latitudes": stop_latitudes,
                 "_stop_longitudes": stop_longitudes,
                 "_stop_package_loads": stop_package_loads,
+                "_stop_snap_distances_m": stop_snap_distances_m,
+                "_stop_last_meter_access_distances_m": stop_access_distances_m,
+                "_stop_last_meter_access_times_min": stop_access_times_min,
+                "_stop_base_service_times_min": stop_base_service_times_min,
+                "_stop_effective_service_times_min": stop_effective_service_times_min,
                 "_stop_arrival_offsets_min": arrival_offsets,
                 "_stop_service_end_offsets_min": (
                     service_end_offsets

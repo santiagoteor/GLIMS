@@ -54,6 +54,17 @@ class OsrmRoutePlan:
     route_stop_service_end_offsets_min: list[list[float]] = field(
         default_factory=list
     )
+    last_meter_access_enabled: bool = False
+    last_meter_walking_speed_m_s: float = 1.2
+    last_meter_round_trip: bool = True
+    client_snap_distances_m: list[float] = field(default_factory=list)
+    client_last_meter_access_distances_m: list[float] = field(default_factory=list)
+    client_last_meter_access_times_min: list[float] = field(default_factory=list)
+    route_last_meter_access_distances_km: list[float] = field(default_factory=list)
+    route_last_meter_access_times_min: list[float] = field(default_factory=list)
+    total_last_meter_access_distance_km: float = 0.0
+    total_last_meter_access_time_min: float = 0.0
+    base_stop_service_time_min: float = 0.0
 
     @property
     def route_count(self) -> int:
@@ -68,3 +79,10 @@ class OsrmRoutePlan:
         if not self.route_durations_min:
             return 0.0
         return sum(self.route_durations_min) / len(self.route_durations_min)
+
+    @property
+    def total_system_distance_km(self) -> float:
+        """Network distance plus explicit off-network last-meter access."""
+        return float(
+            self.total_distance_km + self.total_last_meter_access_distance_km
+        )

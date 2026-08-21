@@ -35,6 +35,9 @@ def _build_result(
     supply_trip_count: int = 0,
     last_mile_km: float = 0.0,
     last_mile_trip_count: int = 0,
+    network_km: float | None = None,
+    last_meter_access_km: float = 0.0,
+    last_meter_access_time_min: float = 0.0,
 ):
     """Build one result row with a common, auditable cost breakdown."""
 
@@ -73,6 +76,9 @@ def _build_result(
         ),
         "paquetes": package_count,
         "km_recorridos": total_km,
+        "network_km": float(total_km if network_km is None else network_km),
+        "last_meter_access_km": float(last_meter_access_km),
+        "last_meter_access_time_min": float(last_meter_access_time_min),
         "numero_viajes": trip_count,
         "direct_km": float(direct_km),
         "direct_trip_count": int(direct_trip_count),
@@ -119,8 +125,9 @@ def _build_result(
             else 0.0
         ),
         "co2_kg_por_km": (
-            float(co2_kg) / float(total_km)
-            if float(total_km) > 0
+            float(co2_kg)
+            / float(total_km if network_km is None else network_km)
+            if float(total_km if network_km is None else network_km) > 0
             else 0.0
         ),
     }
@@ -210,13 +217,16 @@ def simulate_m1(
         last_mile_point=None,
         used_last_mile_point_count=0,
         package_count=package_count,
-        total_km=route_plan.total_distance_km,
+        total_km=route_plan.total_system_distance_km,
         trip_count=route_plan.route_count,
         co2_kg=co2_kg,
         nox_kg=nox_kg,
         costs=costs,
         direct_km=route_plan.total_distance_km,
         direct_trip_count=route_plan.route_count,
+        network_km=route_plan.total_distance_km,
+        last_meter_access_km=route_plan.total_last_meter_access_distance_km,
+        last_meter_access_time_min=route_plan.total_last_meter_access_time_min,
     )
 
 
@@ -285,13 +295,16 @@ def simulate_m2(
         last_mile_point=None,
         used_last_mile_point_count=0,
         package_count=package_count,
-        total_km=route_plan.total_distance_km,
+        total_km=route_plan.total_system_distance_km,
         trip_count=route_plan.route_count,
         co2_kg=co2_kg,
         nox_kg=nox_kg,
         costs=costs,
         direct_km=route_plan.total_distance_km,
         direct_trip_count=route_plan.route_count,
+        network_km=route_plan.total_distance_km,
+        last_meter_access_km=route_plan.total_last_meter_access_distance_km,
+        last_meter_access_time_min=route_plan.total_last_meter_access_time_min,
     )
 
 
@@ -307,6 +320,8 @@ def simulate_m3(
     bike_distance_km: float,
     bike_duration_min: float,
     bike_route_count: int,
+    last_meter_access_km: float,
+    last_meter_access_time_min: float,
     parameters: dict,
     cost_parameters: dict[str, float],
 ):
@@ -411,7 +426,11 @@ def simulate_m3(
         last_mile_point=last_mile_point,
         used_last_mile_point_count=used_microhub_count,
         package_count=package_count,
-        total_km=supply_plan.total_distance_km + bike_distance_km,
+        total_km=(
+            supply_plan.total_distance_km
+            + bike_distance_km
+            + last_meter_access_km
+        ),
         trip_count=supply_plan.route_count + bike_route_count,
         co2_kg=supply_co2,
         nox_kg=nox_kg,
@@ -420,6 +439,9 @@ def simulate_m3(
         supply_trip_count=supply_plan.route_count,
         last_mile_km=bike_distance_km,
         last_mile_trip_count=bike_route_count,
+        network_km=supply_plan.total_distance_km + bike_distance_km,
+        last_meter_access_km=last_meter_access_km,
+        last_meter_access_time_min=last_meter_access_time_min,
     )
 
 
@@ -435,6 +457,8 @@ def simulate_m4(
     walking_distance_km: float,
     walking_duration_min: float,
     walking_route_count: int,
+    last_meter_access_km: float,
+    last_meter_access_time_min: float,
     parameters: dict,
     cost_parameters: dict[str, float],
 ):
@@ -542,7 +566,11 @@ def simulate_m4(
         last_mile_point=last_mile_point,
         used_last_mile_point_count=used_pudo_count,
         package_count=package_count,
-        total_km=supply_plan.total_distance_km + walking_distance_km,
+        total_km=(
+            supply_plan.total_distance_km
+            + walking_distance_km
+            + last_meter_access_km
+        ),
         trip_count=total_routes,
         co2_kg=supply_co2,
         nox_kg=nox_kg,
@@ -551,6 +579,9 @@ def simulate_m4(
         supply_trip_count=supply_plan.route_count,
         last_mile_km=walking_distance_km,
         last_mile_trip_count=walking_route_count,
+        network_km=supply_plan.total_distance_km + walking_distance_km,
+        last_meter_access_km=last_meter_access_km,
+        last_meter_access_time_min=last_meter_access_time_min,
     )
 
 
@@ -566,6 +597,8 @@ def simulate_m5(
     supply_plan: OsrmRoutePlan,
     customer_travel_km: float,
     customer_travel_min: float,
+    last_meter_access_km: float,
+    last_meter_access_time_min: float,
     parameters: dict,
     cost_parameters: dict[str, float],
 ):
@@ -652,4 +685,11 @@ def simulate_m5(
         supply_trip_count=supply_plan.route_count,
         last_mile_km=customer_travel_km,
         last_mile_trip_count=customer_count,
+        network_km=(
+            supply_plan.total_distance_km
+            + customer_travel_km
+            - last_meter_access_km
+        ),
+        last_meter_access_km=last_meter_access_km,
+        last_meter_access_time_min=last_meter_access_time_min,
     )

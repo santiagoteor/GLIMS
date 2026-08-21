@@ -9,6 +9,10 @@ from code.common.routing_utils import calculate_route_durations, calculate_route
 from code.routing.config import RoutingAlgorithmConfig
 from code.routing.cws import clarke_wright_savings
 from code.routing.ils import iterated_local_search
+from code.routing.last_meter import (
+    add_last_meter_time_to_duration_matrix,
+    build_last_meter_access_metrics,
+)
 from code.routing.osrm_client import get_osrm_host, osrm_distance_duration_table, osrm_table
 from code.routing.osrm_validation import (
     sanitize_osrm_routing_inputs,
@@ -113,6 +117,9 @@ class CapacityAwareOsrmRouter:
         shift_end: datetime | None = None,
         show_progress: bool = False,
         exclude_unroutable_clients: bool = False,
+        last_meter_access_enabled: bool = False,
+        last_meter_walking_speed_m_s: float = 1.2,
+        last_meter_round_trip: bool = True,
     ) -> OsrmRoutePlan:
         distance_matrix, duration_matrix = self.get_matrices(
             depot_latitude=depot_latitude,
@@ -197,7 +204,18 @@ class CapacityAwareOsrmRouter:
         )
 
         preparation_start = perf_counter()
-        
+
+        # Last-meter access is derived from the OSRM snap metadata already
+        # produced by the /table request. No extra HTTP request is issued.
+        last_meter_metrics = build_last_meter_access_metrics(
+            city=self.city,
+            transport_mode=transport_mode,
+            clients=clients,
+            enabled=last_meter_access_enabled,
+            walking_speed_m_s=last_meter_walking_speed_m_s,
+            round_trip=last_meter_round_trip,
+        )
+
         base_duration_matrix = np.asarray(duration_matrix, dtype=float).copy()
 
         if transport_mode == "driving":
@@ -217,10 +235,24 @@ class CapacityAwareOsrmRouter:
                 source="traffic_not_applied_to_non_driving_mode",
             )
 
-        duration_matrix = apply_traffic_profile(
+        travel_duration_matrix = apply_traffic_profile(
             duration_matrix,
             effective_traffic_profile,
         )
+        duration_matrix = travel_duration_matrix
+        if last_meter_access_enabled:
+            duration_matrix = add_last_meter_time_to_duration_matrix(
+                travel_duration_matrix,
+                last_meter_metrics.access_time_min,
+            )
+            print(
+                "Last-meter access enabled: "
+                f"{last_meter_metrics.total_access_distance_km:.3f} km "
+                "off-network access | "
+                f"{last_meter_metrics.total_access_time_min:.2f} min | "
+                f"walking speed={float(last_meter_walking_speed_m_s):.2f} m/s | "
+                f"round_trip={bool(last_meter_round_trip)}"
+            )
         preparation_seconds = perf_counter() - preparation_start
         print(
             f"Routing preparation completed in "
@@ -367,6 +399,9 @@ class CapacityAwareOsrmRouter:
                     traffic_provider=time_traffic_provider,
                     traffic_zone=traffic_zone,
                     service_time_per_stop_min=SERVICE_TIME_PER_STOP_MIN,
+                    service_time_by_node_min=np.concatenate(
+                        ([0.0], SERVICE_TIME_PER_STOP_MIN + last_meter_metrics.access_time_min)
+                    ),
                     route_preparation_time_min=route_start_time_per_route_min,
                 )
                 for route in routes
@@ -391,9 +426,14 @@ class CapacityAwareOsrmRouter:
                         continue
 
                     last_delivery_segment = non_depot_segments[-1]
+                    last_client_node = int(last_delivery_segment.destination_index)
+                    effective_service_min = float(
+                        SERVICE_TIME_PER_STOP_MIN
+                        + last_meter_metrics.access_time_min[last_client_node - 1]
+                    )
                     service_completion = (
                         last_delivery_segment.arrival_datetime
-                        + timedelta(minutes=float(SERVICE_TIME_PER_STOP_MIN))
+                        + timedelta(minutes=effective_service_min)
                     )
                     if (
                         latest_service_completion is None
@@ -437,8 +477,13 @@ class CapacityAwareOsrmRouter:
                         segment.arrival_datetime - timeline.route_start
                     ).total_seconds() / 60.0
                     arrival_offsets.append(float(arrival_offset))
+                    client_node = int(segment.destination_index)
                     service_end_offsets.append(
-                        float(arrival_offset + SERVICE_TIME_PER_STOP_MIN)
+                        float(
+                            arrival_offset
+                            + SERVICE_TIME_PER_STOP_MIN
+                            + last_meter_metrics.access_time_min[client_node - 1]
+                        )
                     )
 
                 route_stop_arrival_offsets_min.append(arrival_offsets)
@@ -454,10 +499,13 @@ class CapacityAwareOsrmRouter:
 
                 for client_node in route:
                     current_offset += float(
-                        duration_matrix[previous_node, client_node]
+                        travel_duration_matrix[previous_node, client_node]
                     )
                     arrival_offsets.append(float(current_offset))
-                    current_offset += float(SERVICE_TIME_PER_STOP_MIN)
+                    current_offset += float(
+                        SERVICE_TIME_PER_STOP_MIN
+                        + last_meter_metrics.access_time_min[client_node - 1]
+                    )
                     service_end_offsets.append(float(current_offset))
                     previous_node = client_node
 
@@ -478,10 +526,30 @@ class CapacityAwareOsrmRouter:
         )
         route_loads = calculate_route_loads(routes, demands)
 
+        base_stop_service_time = len(clients) * SERVICE_TIME_PER_STOP_MIN
         service_time = (
-            len(clients) * SERVICE_TIME_PER_STOP_MIN
+            base_stop_service_time
+            + last_meter_metrics.total_access_time_min
             + len(routes) * float(route_start_time_per_route_min)
         )
+        route_last_meter_access_distances_km = [
+            float(
+                sum(
+                    last_meter_metrics.access_distance_m[client_node - 1]
+                    for client_node in route
+                ) / 1000.0
+            )
+            for route in routes
+        ]
+        route_last_meter_access_times_min = [
+            float(
+                sum(
+                    last_meter_metrics.access_time_min[client_node - 1]
+                    for client_node in route
+                )
+            )
+            for route in routes
+        ]
 
         return OsrmRoutePlan(
             transport_mode=transport_mode,
@@ -559,6 +627,29 @@ class CapacityAwareOsrmRouter:
             route_stop_service_end_offsets_min=(
                 route_stop_service_end_offsets_min
             ),
+            last_meter_access_enabled=bool(last_meter_access_enabled),
+            last_meter_walking_speed_m_s=float(last_meter_walking_speed_m_s),
+            last_meter_round_trip=bool(last_meter_round_trip),
+            client_snap_distances_m=last_meter_metrics.snap_distance_m.astype(float).tolist(),
+            client_last_meter_access_distances_m=(
+                last_meter_metrics.access_distance_m.astype(float).tolist()
+            ),
+            client_last_meter_access_times_min=(
+                last_meter_metrics.access_time_min.astype(float).tolist()
+            ),
+            route_last_meter_access_distances_km=(
+                route_last_meter_access_distances_km
+            ),
+            route_last_meter_access_times_min=(
+                route_last_meter_access_times_min
+            ),
+            total_last_meter_access_distance_km=(
+                last_meter_metrics.total_access_distance_km
+            ),
+            total_last_meter_access_time_min=(
+                last_meter_metrics.total_access_time_min
+            ),
+            base_stop_service_time_min=float(base_stop_service_time),
         )
 
     def build_independent_round_trips(

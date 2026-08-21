@@ -20,3 +20,22 @@ class RoutingAlgorithmConfig:
     ils_random_seed: int | None = 42
     last_service_deadline_enabled: bool = False
     last_service_margin_min: float = 30.0
+    last_meter_access_enabled: bool = False
+    last_meter_walking_speed_m_s: float = 1.2
+    last_meter_round_trip: bool = True
+    last_meter_models: tuple[str, ...] | None = ("M1", "M2")
+
+    def last_meter_applies_to(self, model_code: str) -> bool:
+        """Return whether last-meter access is enabled for one model.
+
+        ``None`` or an empty tuple means all supported models. This keeps the
+        model filter optional while preserving M1/M2 as the explicit default.
+        """
+
+        if not self.last_meter_access_enabled:
+            return False
+        if not self.last_meter_models:
+            return True
+        return str(model_code).upper() in {
+            str(model).upper() for model in self.last_meter_models
+        }
