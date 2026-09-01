@@ -194,6 +194,35 @@ Keeping these settings in configuration files is preferable to maintaining long 
 
 ------------------------------------------------------------------------
 
+### Running Batch Experiments from a Configuration File
+
+A configuration file may define multiple demand scenarios and/or instance sizes. GLIMS expands these values into independent experiment configurations before simulation.
+
+For example:
+
+``` json
+{
+  "demand_scenario": ["low", "medium", "high"],
+  "instance_size": [2000, 8000],
+  "demand_seed": [42, 101, 202]
+}
+```
+
+The scenario and size dimensions form a Cartesian product. Seed replication is then applied to every scenario-size combination:
+
+``` text
+3 scenarios × 2 sizes × 3 demand-seed replicates
+= 18 experiments
+```
+
+The simulator executes the expanded experiments sequentially and reports the active scenario, instance size, demand seed, and ILS seed for each run. Each expanded run remains an independent GLIMS experiment with its own resolved configuration and outputs.
+
+The seed-expansion rules are unchanged. In particular, if both `demand_seed` and `ils_random_seed` are lists, the seeds are paired one-to-one by position rather than expanded as a Cartesian product.
+
+Batch scenario and size lists are defined in the JSON configuration. The CLI options `--demand-scenario` and `--instance-size` are scalar overrides and are intended for individual executions or temporary tests.
+
+------------------------------------------------------------------------
+
 ### Running with Command-Line Overrides
 
 Selected experiment settings can also be supplied through command-line arguments.
@@ -299,9 +328,9 @@ instance_size   = 40000
 demand_seed     = 42
 ```
 
-These values are normally defined in the experiment configuration.
+These values are normally defined in the experiment configuration. When `demand_scenario` or `instance_size` is a list, each expanded experiment resolves its own concrete demand file using the corresponding scenario, size, and demand seed.
 
-They can also be overridden from the command line:
+They can also be overridden from the command line with scalar values:
 
 ``` bash
 python -m code.simulation.osrm_simulator \
@@ -316,6 +345,8 @@ An explicit demand instance can instead be selected using:
 ``` text
 --demand-instance-id
 ```
+
+Because this option identifies one concrete demand instance, it cannot be combined with list-valued `demand_scenario` or `instance_size` in a batch configuration.
 
 This option accepts the corresponding demand CSV filename or stem inside:
 

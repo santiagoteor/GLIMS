@@ -82,8 +82,8 @@ The principal fields are:
 | `experiment_name` | Human-readable identifier for the experiment.                |
 | `city`            | City in which the experiment is executed.                    |
 | `zones`           | Administrative zones included in the simulation.             |
-| `demand_scenario` | Parcel-intensity scenario (`low`, `medium`, or `high`).      |
-| `instance_size`   | Number of simulated customers.                               |
+| `demand_scenario` | Parcel-intensity scenario (`low`, `medium`, or `high`), or a list of scenarios for batch execution. |
+| `instance_size`   | Number of simulated customers, or a list of instance sizes for batch execution. |
 | `demand_seed`     | Seed or seeds selecting reproducible demand realisations.    |
 | `osrm_profile`    | Primary OSRM routing profile associated with the experiment. |
 
@@ -224,6 +224,44 @@ the adjustment represents access to the final customer, not unloading at an
 intermediate facility. For M5, which has no 5-minute home-delivery service
 operation, the snap access is added to the customer round-trip distance/time
 without introducing a delivery-service stop.
+
+------------------------------------------------------------------------
+
+### Batch Experiment Expansion
+
+`demand_scenario` and `instance_size` may be defined either as scalar values or as lists in the experiment JSON. When one or both are lists, GLIMS expands them before execution.
+
+For example:
+
+``` json
+{
+  "demand_scenario": ["low", "medium", "high"],
+  "instance_size": [2000, 8000, 17200],
+  "demand_seed": [42, 101, 202, 303, 404]
+}
+```
+
+The scenario and instance-size dimensions are expanded as a Cartesian product:
+
+``` text
+3 demand scenarios
+        ×
+3 instance sizes
+        =
+9 scenario-size combinations
+```
+
+Seed replication is then applied independently to each scenario-size combination according to the rules described under **Repeated Experiments and Random Seeds**. With the five demand seeds shown above and a scalar ILS seed, the example therefore produces:
+
+``` text
+3 scenarios × 3 sizes × 5 demand seeds = 45 experiments
+```
+
+When both `demand_seed` and `ils_random_seed` are lists, their existing one-to-one pairing rule is preserved; the two seed lists do not form a Cartesian product.
+
+Batch values are intended for configuration-file execution. The command-line overrides `--demand-scenario` and `--instance-size` remain scalar overrides for individual tests.
+
+An explicit `demand_instance_id` identifies one concrete demand file and therefore cannot be combined with list-valued `demand_scenario` or `instance_size`.
 
 ------------------------------------------------------------------------
 

@@ -185,12 +185,12 @@ def main() -> None:
         overrides=vars(args),
     )
 
-    expanded_configs = _expand_seed_configs(config)
+    expanded_configs = _expand_experiment_configs(config)
 
     if len(expanded_configs) > 1:
         print(
             f"Running {len(expanded_configs)} independent experiment "
-            "replicates:"
+            "configurations:"
         )
 
     total = len(expanded_configs)
@@ -200,12 +200,47 @@ def main() -> None:
 
         if total > 1:
             print(
-                f"\n===== Replicate {index}/{total} | "
+                f"\n===== Experiment {index}/{total} | "
+                f"scenario={seed_config.demand_scenario} | "
+                f"size={seed_config.instance_size} | "
                 f"demand_seed={demand_seed} | "
                 f"ils_random_seed={ils_seed} ====="
             )
 
         _run_resolved_config(seed_config)
+
+
+def _expand_experiment_configs(
+    config: ExperimentConfig,
+) -> list[ExperimentConfig]:
+    """
+    Expand batch scenario/size values and then expand seed replicates.
+
+    demand_scenario and instance_size use a Cartesian product. Seed lists keep
+    the existing pairing rules implemented by _expand_seed_configs.
+    """
+
+    scenarios = (
+        config.demand_scenario
+        if isinstance(config.demand_scenario, list)
+        else [config.demand_scenario]
+    )
+    sizes = (
+        config.instance_size
+        if isinstance(config.instance_size, list)
+        else [config.instance_size]
+    )
+
+    expanded: list[ExperimentConfig] = []
+    for scenario in scenarios:
+        for size in sizes:
+            concrete = replace(
+                config,
+                demand_scenario=scenario,
+                instance_size=size,
+            )
+            expanded.extend(_expand_seed_configs(concrete))
+    return expanded
 
 
 def _expand_seed_configs(
