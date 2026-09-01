@@ -68,3 +68,7 @@ Thumbs.db
 
 # Large external datasets
 data/external/
+
+# Machine learning models
+code/ml/
+data/ml/

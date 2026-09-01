@@ -137,7 +137,7 @@ Experiments are normally described through JSON configuration files stored under
 configs/experiments/
 ```
 
-These files centralise the main experimental choices, including the study area, demand instance, routing method, random seeds, simulation constraints, facility-selection behaviour, output options, and other experiment-specific settings.
+These files centralise the main experimental choices, including the study area, demand instance, routing method, random seeds, simulation constraints, facility-selection behaviour, output options, and other experiment-specific settings. A single configuration can also define batch experiments over multiple demand scenarios and instance sizes, with seed replication applied to each expanded combination.
 
 For example:
 

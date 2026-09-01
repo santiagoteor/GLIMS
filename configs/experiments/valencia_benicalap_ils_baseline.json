@@ -4,8 +4,8 @@
   "zones": [
     "Benicalap:neighborhood", "Camins al Grau", "La Punta"
   ],
-  "demand_scenario": "low",
-  "instance_size": 1000,
+  "demand_scenario": ["low", "medium", "high"],
+  "instance_size": [100, 200, 300],
   "demand_seed": [42, 101, 202, 303, 404],
   "osrm_profile": "driving",
   "routing": {
@@ -65,6 +65,6 @@
     "enabled": true,
     "walking_speed_m_s": 1.2,
     "round_trip": true,
-    "models": ["M1", "M2", "M3", "M4"]
+    "models": ["M1", "M2"]
   }
 }

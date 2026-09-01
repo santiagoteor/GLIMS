@@ -87,8 +87,8 @@ class ExperimentConfig:
     experiment_name: str = "glims_experiment"
     city: str = "madrid"
     zones: list[str] | None = None
-    demand_scenario: str = "medium"
-    instance_size: int = 100
+    demand_scenario: str | list[str] = "medium"
+    instance_size: int | list[int] = 100
     demand_seed: int | list[int] | None = None
     demand_instance_id: str | None = None
     osrm_profile: str = "driving"
@@ -136,8 +136,12 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         ),
         city=str(raw.get("city", "madrid")),
         zones=_normalize_zones(raw.get("zones")),
-        demand_scenario=str(raw.get("demand_scenario", "medium")),
-        instance_size=int(raw.get("instance_size", 100)),
+        demand_scenario=_normalize_scenario_value(
+            raw.get("demand_scenario", "medium")
+        ),
+        instance_size=_normalize_instance_size_value(
+            raw.get("instance_size", 100)
+        ),
         demand_seed=_normalize_seed_value(
             raw.get("demand_seed"),
             field_name="demand_seed",
@@ -176,12 +180,40 @@ def validate_experiment_config(config: ExperimentConfig) -> None:
         )
     if config.city == "all" and config.zones:
         raise ValueError("zones cannot be used when city is 'all'.")
-    if config.demand_scenario not in {"low", "medium", "high"}:
+    scenarios = (
+        config.demand_scenario
+        if isinstance(config.demand_scenario, list)
+        else [config.demand_scenario]
+    )
+    if not scenarios:
+        raise ValueError("demand_scenario list cannot be empty.")
+    invalid_scenarios = sorted(
+        set(scenarios).difference({"low", "medium", "high"})
+    )
+    if invalid_scenarios:
         raise ValueError(
-            "demand_scenario must be 'low', 'medium', or 'high'."
+            "demand_scenario values must be 'low', 'medium', or 'high'. "
+            f"Invalid values: {invalid_scenarios}."
         )
-    if config.instance_size <= 0:
-        raise ValueError("instance_size must be greater than zero.")
+    if len(set(scenarios)) != len(scenarios):
+        raise ValueError("demand_scenario cannot contain duplicate values.")
+
+    sizes = (
+        config.instance_size
+        if isinstance(config.instance_size, list)
+        else [config.instance_size]
+    )
+    if not sizes:
+        raise ValueError("instance_size list cannot be empty.")
+    if any(
+        isinstance(size, bool) or not isinstance(size, int) or size <= 0
+        for size in sizes
+    ):
+        raise ValueError(
+            "Every instance_size value must be an integer greater than zero."
+        )
+    if len(set(sizes)) != len(sizes):
+        raise ValueError("instance_size cannot contain duplicate values.")
     if config.output.summary_detail not in {"compact", "full"}:
         raise ValueError(
             "output.summary_detail must be either 'compact' or 'full'."
@@ -235,6 +267,14 @@ def validate_experiment_config(config: ExperimentConfig) -> None:
         raise ValueError(
             "Use either demand_seed or demand_instance_id, not both. "
             "demand_instance_id is intended for explicit file selection."
+        )
+    if config.demand_instance_id is not None and (
+        isinstance(config.demand_scenario, list)
+        or isinstance(config.instance_size, list)
+    ):
+        raise ValueError(
+            "demand_instance_id requires scalar demand_scenario and "
+            "instance_size values; it cannot be combined with batch lists."
         )
     if config.osrm_profile not in OSRM_PORTS["madrid"]:
         raise ValueError(
@@ -532,6 +572,43 @@ def _pick(value: Any, fallback: Any) -> Any:
     return fallback if value is None else value
 
 
+
+
+def _normalize_scenario_value(value: Any) -> str | list[str]:
+    """Normalize scalar/list demand scenarios while preserving semantics."""
+
+    if isinstance(value, list):
+        return [str(item).strip().lower() for item in value]
+    return str(value).strip().lower()
+
+
+def _normalize_instance_size_value(value: Any) -> int | list[int]:
+    """Normalize scalar/list instance sizes while preserving semantics."""
+
+    if isinstance(value, bool):
+        raise ValueError(
+            "instance_size must be an integer or a list of integers."
+        )
+    if isinstance(value, list):
+        normalized = []
+        for size in value:
+            if isinstance(size, bool):
+                raise ValueError(
+                    "Every instance_size value must be an integer."
+                )
+            try:
+                normalized.append(int(size))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "Every instance_size value must be an integer."
+                ) from exc
+        return normalized
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "instance_size must be an integer or a list of integers."
+        ) from exc
 
 def _normalize_seed_value(
     value: Any,

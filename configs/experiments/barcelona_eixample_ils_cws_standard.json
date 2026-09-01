@@ -2,11 +2,11 @@
   "experiment_name": "barcelona_eixample_ils_baseline",
   "city": "barcelona",
   "zones": [
-    "l'Eixample", "Ciutat Vella", "El Carmel"
+    "Eixample", "Ciutat Vella", "El Carmel"
   ],
-  "demand_scenario": "low",
-  "instance_size": 1000,
-  "demand_seed": 42,
+  "demand_scenario": ["low", "medium", "high"],
+  "instance_size": [100, 200, 300],
+  "demand_seed": [42, 101, 202, 303, 404],
   "osrm_profile": "driving",
   "routing": {
     "algorithm": "ils",
@@ -21,7 +21,7 @@
     "ils_relocate_candidate_fraction": 0.10,
     "ils_relocate_neighbor_routes": 5,
     "ils_relocate_max_insertions": 3,
-    "ils_random_seed": 42,
+    "ils_random_seed": [42, 101, 202, 303, 404],
     "last_service_deadline_enabled": true,
     "last_service_margin_min": 30,
     "ils_max_full_destruction_attempts": 2,
@@ -40,11 +40,8 @@
     "save_configuration": true,
     "save_metadata": true,
     "save_route_geometry": false,
-    "summary_detail": "full",
-    "audit_detail": "summary",
-    "performance_profile": "basic",
-    "show_progress": true,
-    "save_route_stops": true
+    "summary_detail": "compact",
+    "show_progress": true
   },
   "facility_filter": {
     "enabled": true,
@@ -60,5 +57,11 @@
   "osrm_cache": {
     "enabled": true,
     "directory": ".glims_cache/osrm"
+  },
+  "last_meter_access": {
+    "enabled": true,
+    "walking_speed_m_s": 1.2,
+    "round_trip": true,
+    "models": ["M1", "M2"]
   }
 }
