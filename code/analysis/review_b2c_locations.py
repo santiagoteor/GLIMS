@@ -14,6 +14,7 @@ from code.common.constants import (
     LAST_MILE_STATION_SERVICE_TYPE_CODE,
     WAREHOUSE_SERVICE_TYPE_CODE,
     CONVENIENCE_STORE_SERVICE_TYPE_CODE,
+    MICROHUB_SERVICE_TYPE_CODE,
 )
 
 RECORD_TYPE_CATALOG = {
@@ -49,6 +50,10 @@ RECORD_TYPE_CATALOG = {
         "name": "Convenience Store",
         "description": "Convenience store",
     },
+    8: {
+        "name": "Microhub",
+        "description": "Validated microhub facility",
+    },
 }
 
 
@@ -70,12 +75,12 @@ TYPE_GROUP_CATALOG = {
     },
     MICROHUB_GROUP_CODE: {
         "name": "Microhub",
-        "description": "Last Mile Logistics Station records",
+        "description": "Validated Microhub records",
     },
     CC_GROUP_CODE: {
         "name": "CC",
         "description": (
-            "Distribution / Reception Center and Warehouse records"
+            "Distribution / Reception Center, Last Mile Logistics Station and Warehouse records"
         ),
     },
 }
@@ -86,7 +91,8 @@ RECORD_TYPE_TO_GROUP = {
     CONVENIENCE_STORE_SERVICE_TYPE_CODE: PUDO_GROUP_CODE,
     CLICK_COLLECT_SERVICE_TYPE_CODE: PUDO_GROUP_CODE,
     PUDO_SERVICE_TYPE_CODE: PUDO_GROUP_CODE,
-    LAST_MILE_STATION_SERVICE_TYPE_CODE: MICROHUB_GROUP_CODE,
+    LAST_MILE_STATION_SERVICE_TYPE_CODE: CC_GROUP_CODE,
+    MICROHUB_SERVICE_TYPE_CODE: MICROHUB_GROUP_CODE,
     DISTRIBUTION_CENTER_SERVICE_TYPE_CODE: CC_GROUP_CODE,
     WAREHOUSE_SERVICE_TYPE_CODE: CC_GROUP_CODE,
 }
@@ -101,6 +107,7 @@ TYPE_CAPACITY = {
     LAST_MILE_STATION_SERVICE_TYPE_CODE: 300,
     DISTRIBUTION_CENTER_SERVICE_TYPE_CODE: 500,
     WAREHOUSE_SERVICE_TYPE_CODE: 500,
+    MICROHUB_SERVICE_TYPE_CODE: 300,
 }
 
 
@@ -247,6 +254,7 @@ def classify_record_type(value) -> int:
         "ALMACEN E FULFILMENT": 6,
         "CONVENIENCE STORES": 7,
         "CONVENIENCE STORE": 7,
+        "MICROHUB": MICROHUB_SERVICE_TYPE_CODE,
     }
 
     return mapping.get(normalized, 0)
@@ -820,6 +828,7 @@ def build_cluster_summary(
                 "Has_Last_Mile_Station": 5 in service_codes,
                 "Has_Warehouse": 6 in service_codes,
                 "Has_Convenience_Store": 7 in service_codes,
+                "Has_Microhub": 8 in service_codes,
                 "Has_Unknown": 0 in service_codes,
                 "Cluster_Service_Type_Code": (
                     cluster_type_code
@@ -863,6 +872,7 @@ def enrich_records_with_cluster_data(
         "Has_Last_Mile_Station",
         "Has_Warehouse",
         "Has_Convenience_Store",
+        "Has_Microhub",
         "Has_Unknown",
         "Cluster_Service_Type_Code",
         "Cluster_Service_Type_Name",

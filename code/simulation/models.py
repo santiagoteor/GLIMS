@@ -172,7 +172,7 @@ def simulate_m1(
         ),
     )
     co2_kg = (route_plan.total_distance_km * model["co2_km"]) / 1000
-    nox_factor_g_km = model.get("nox_km_estimado_cliente", 0.0)
+    nox_factor_g_km = model.get("nox_km", 0.0)
     nox_factor_g_km = (
         0.0
         if pd.isna(nox_factor_g_km)
@@ -324,10 +324,14 @@ def simulate_m3(
     last_meter_access_time_min: float,
     parameters: dict,
     cost_parameters: dict[str, float],
+    supply_vehicle_type: str = "electric",
 ):
     """Simulate warehouse supply plus multi-microhub cargo-bike delivery."""
 
-    van = parameters["FURGONETA_ELEC"]
+    if supply_vehicle_type not in {"electric", "conventional"}:
+        raise ValueError(f"Invalid supply vehicle type: {supply_vehicle_type}")
+    van = parameters["FURGONETA_ELEC" if supply_vehicle_type == "electric" else "FURGONETA_CONV"]
+    van_cost_key = "electric_van" if supply_vehicle_type == "electric" else "conventional_van"
     bike = parameters["BICICLETA_CARGO"]
 
     supply_distance_cost, supply_labor_cost, _ = (
@@ -337,10 +341,10 @@ def simulate_m3(
             route_count=supply_plan.route_count,
             route_start_time_per_route_min=supply_plan.route_start_time_per_route_min,
             cost_per_km=get_cost_parameter(
-                cost_parameters, "electric_van_cost_per_km"
+                cost_parameters, f"{van_cost_key}_cost_per_km"
             ),
             labor_cost_per_hour=get_cost_parameter(
-                cost_parameters, "electric_van_labor_cost_per_hour"
+                cost_parameters, f"{van_cost_key}_labor_cost_per_hour"
             ),
         )
     )
@@ -359,8 +363,9 @@ def simulate_m3(
         )
     )
 
-    supply_co2 = 0.0  # Electric van: zero direct/tailpipe CO2 emissions.
-    nox_kg = 0.0  # Electric van / cargo bike / walking: zero direct NOx.
+    supply_co2 = supply_plan.total_distance_km * float(van["co2_km"]) / 1000.0
+    nox_factor = van.get("nox_km", 0.0)
+    nox_kg = supply_plan.total_distance_km * (0.0 if pd.isna(nox_factor) else float(nox_factor)) / 1000.0
     route_distance_cost = supply_distance_cost + bike_distance_cost
     route_labor_cost = supply_labor_cost + bike_labor_cost
 
@@ -387,7 +392,7 @@ def simulate_m3(
         vehicle_fixed_cost_per_route=(
             supply_plan.route_count
             * get_cost_parameter(
-                cost_parameters, "electric_van_fixed_cost_per_route"
+                cost_parameters, f"{van_cost_key}_fixed_cost_per_route"
             )
             + bike_route_count
             * get_cost_parameter(
@@ -400,7 +405,7 @@ def simulate_m3(
         vehicle_capex_allocation_per_route=(
             supply_plan.route_count
             * get_cost_parameter(
-                cost_parameters, "electric_van_capex_allocation_per_route"
+                cost_parameters, f"{van_cost_key}_capex_allocation_per_route"
             )
             + bike_route_count
             * get_cost_parameter(
@@ -417,7 +422,7 @@ def simulate_m3(
         additional=additional,
     )
 
-    return _build_result(
+    result = _build_result(
         city=city,
         neighborhood_name=neighborhood_name,
         model_code="M3",
@@ -443,6 +448,10 @@ def simulate_m3(
         last_meter_access_km=last_meter_access_km,
         last_meter_access_time_min=last_meter_access_time_min,
     )
+    result["supply_vehicle_type"] = supply_vehicle_type
+    result["supply_vehicle_co2_kg"] = supply_co2
+    result["supply_vehicle_nox_kg"] = nox_kg
+    return result
 
 
 def simulate_m4(
@@ -461,10 +470,14 @@ def simulate_m4(
     last_meter_access_time_min: float,
     parameters: dict,
     cost_parameters: dict[str, float],
+    supply_vehicle_type: str = "electric",
 ):
     """Simulate multi-PUDO supply plus courier delivery on foot."""
 
-    van = parameters["FURGONETA_ELEC"]
+    if supply_vehicle_type not in {"electric", "conventional"}:
+        raise ValueError(f"Invalid supply vehicle type: {supply_vehicle_type}")
+    van = parameters["FURGONETA_ELEC" if supply_vehicle_type == "electric" else "FURGONETA_CONV"]
+    van_cost_key = "electric_van" if supply_vehicle_type == "electric" else "conventional_van"
     walking = parameters["PUDO_A_PIE"]
 
     supply_distance_cost, supply_labor_cost, _ = (
@@ -474,10 +487,10 @@ def simulate_m4(
             route_count=supply_plan.route_count,
             route_start_time_per_route_min=supply_plan.route_start_time_per_route_min,
             cost_per_km=get_cost_parameter(
-                cost_parameters, "electric_van_cost_per_km"
+                cost_parameters, f"{van_cost_key}_cost_per_km"
             ),
             labor_cost_per_hour=get_cost_parameter(
-                cost_parameters, "electric_van_labor_cost_per_hour"
+                cost_parameters, f"{van_cost_key}_labor_cost_per_hour"
             ),
         )
     )
@@ -496,8 +509,9 @@ def simulate_m4(
         )
     )
 
-    supply_co2 = 0.0  # Electric van: zero direct/tailpipe CO2 emissions.
-    nox_kg = 0.0  # Electric van / cargo bike / walking: zero direct NOx.
+    supply_co2 = supply_plan.total_distance_km * float(van["co2_km"]) / 1000.0
+    nox_factor = van.get("nox_km", 0.0)
+    nox_kg = supply_plan.total_distance_km * (0.0 if pd.isna(nox_factor) else float(nox_factor)) / 1000.0
     route_distance_cost = supply_distance_cost + walking_distance_cost
     route_labor_cost = supply_labor_cost + walking_labor_cost
     pudo_commission = get_cost_parameter(
@@ -508,7 +522,7 @@ def simulate_m4(
     weighted_vehicle_fixed = (
         supply_plan.route_count
         * get_cost_parameter(
-            cost_parameters, "electric_van_fixed_cost_per_route"
+            cost_parameters, f"{van_cost_key}_fixed_cost_per_route"
         )
         + walking_route_count
         * get_cost_parameter(
@@ -518,7 +532,7 @@ def simulate_m4(
     weighted_vehicle_capex = (
         supply_plan.route_count
         * get_cost_parameter(
-            cost_parameters, "electric_van_capex_allocation_per_route"
+            cost_parameters, f"{van_cost_key}_capex_allocation_per_route"
         )
         + walking_route_count
         * get_cost_parameter(
@@ -557,7 +571,7 @@ def simulate_m4(
         additional=additional,
     )
 
-    return _build_result(
+    result = _build_result(
         city=city,
         neighborhood_name=neighborhood_name,
         model_code="M4",
@@ -583,6 +597,10 @@ def simulate_m4(
         last_meter_access_km=last_meter_access_km,
         last_meter_access_time_min=last_meter_access_time_min,
     )
+    result["supply_vehicle_type"] = supply_vehicle_type
+    result["supply_vehicle_co2_kg"] = supply_co2
+    result["supply_vehicle_nox_kg"] = nox_kg
+    return result
 
 
 def simulate_m5(
@@ -601,10 +619,14 @@ def simulate_m5(
     last_meter_access_time_min: float,
     parameters: dict,
     cost_parameters: dict[str, float],
+    supply_vehicle_type: str = "electric",
 ):
     """Simulate multi-PUDO supply plus customer collection travel."""
 
-    van = parameters["FURGONETA_ELEC"]
+    if supply_vehicle_type not in {"electric", "conventional"}:
+        raise ValueError(f"Invalid supply vehicle type: {supply_vehicle_type}")
+    van = parameters["FURGONETA_ELEC" if supply_vehicle_type == "electric" else "FURGONETA_CONV"]
+    van_cost_key = "electric_van" if supply_vehicle_type == "electric" else "conventional_van"
     model = parameters["PUDO_CONSUMIDOR"]
 
     distance_cost, labor_cost, _ = calculate_direct_route_operating_cost(
@@ -613,14 +635,15 @@ def simulate_m5(
         route_count=supply_plan.route_count,
         route_start_time_per_route_min=supply_plan.route_start_time_per_route_min,
         cost_per_km=get_cost_parameter(
-            cost_parameters, "electric_van_cost_per_km"
+            cost_parameters, f"{van_cost_key}_cost_per_km"
         ),
         labor_cost_per_hour=get_cost_parameter(
-            cost_parameters, "electric_van_labor_cost_per_hour"
+            cost_parameters, f"{van_cost_key}_labor_cost_per_hour"
         ),
     )
-    supply_co2 = 0.0  # Electric van: zero direct/tailpipe CO2 emissions.
-    nox_kg = 0.0  # Electric van / cargo bike / walking: zero direct NOx.
+    supply_co2 = supply_plan.total_distance_km * float(van["co2_km"]) / 1000.0
+    nox_factor = van.get("nox_km", 0.0)
+    nox_kg = supply_plan.total_distance_km * (0.0 if pd.isna(nox_factor) else float(nox_factor)) / 1000.0
     customer_co2 = (
         customer_travel_km * float(model.get("co2_km_estimado_cliente", 0.0) or 0.0)
     ) / 1000
@@ -646,13 +669,13 @@ def simulate_m5(
             cost_parameters, "warehouse_handling_cost_per_package"
         ),
         vehicle_fixed_cost_per_route=get_cost_parameter(
-            cost_parameters, "electric_van_fixed_cost_per_route"
+            cost_parameters, f"{van_cost_key}_fixed_cost_per_route"
         ),
         facility_capex_allocation_per_day=get_cost_parameter(
             cost_parameters, "pudo_capex_allocation_per_day"
         ),
         vehicle_capex_allocation_per_route=get_cost_parameter(
-            cost_parameters, "electric_van_capex_allocation_per_route"
+            cost_parameters, f"{van_cost_key}_capex_allocation_per_route"
         ),
         customer_time_cost_per_hour=get_cost_parameter(
             cost_parameters, "customer_time_cost_per_hour"
@@ -667,7 +690,7 @@ def simulate_m5(
         additional=additional,
     )
 
-    return _build_result(
+    result = _build_result(
         city=city,
         neighborhood_name=neighborhood_name,
         model_code="M5",
@@ -693,3 +716,9 @@ def simulate_m5(
         last_meter_access_km=last_meter_access_km,
         last_meter_access_time_min=last_meter_access_time_min,
     )
+    result["supply_vehicle_type"] = supply_vehicle_type
+    result["supply_vehicle_co2_kg"] = supply_co2
+    result["supply_vehicle_nox_kg"] = nox_kg
+    return result
+
+

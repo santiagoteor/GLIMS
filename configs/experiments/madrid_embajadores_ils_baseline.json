@@ -1,11 +1,50 @@
 {
   "experiment_name": "madrid_embajadores_ils_baseline",
   "city": "madrid",
+  "models": ["M1", "M2", "M3", "M4", "M5"],
+  "vehicle_variants": ["conventional", "electric"],
+  "microhub_coverage_radius_m": 3000,
   "zones": [
-    "Embajadores", "Moratalaz", "El Pardo"
-  ],
-  "demand_scenario": ["low", "medium", "high"],
-  "instance_size": [100, 200, 300],
+    "Rosas",
+    "Campamento",
+    "El Goloso",
+    "Casco Histórico de Vicálvaro",
+    "Cuatro Vientos",
+    "Valdemarín",
+    "Justicia",
+    "Nueva España",
+    "Puerta del Ángel",
+    "San Diego",
+    "Puerta Bonita",
+    "Colina",
+    "Trafalgar",
+    "Almenara",
+    "Castillejos",
+    "Lucero",
+    "Pilar",
+    "Almagro",
+    "Casco Histórico de Barajas",
+    "Portazgo",
+    "Comillas",
+    "Ventas",
+    "Fontarrón",
+    "Orcasur",
+    "Valdefuentes",
+    "Ensanche de Vallecas",
+    "Ángeles",
+    "Los Jerónimos",
+    "Fuentelarreina",
+    "Santa Eugenia",
+    "Entrevías",
+    "Valdebernardo",
+    "Valverde",
+    "Ciudad Universitaria",
+    "Águilas",
+    "Horcajo",
+    "Legazpi"
+],
+ "demand_scenario": ["low", "medium", "high"],
+  "instance_size": [40000,17200,8000, 2000, 1000, 300, 200, 100],
   "demand_seed": [42, 101, 202, 303, 404],
   "osrm_profile": "driving",
   "routing": {
@@ -39,23 +78,24 @@
     "save_route_details": true,
     "save_configuration": true,
     "save_metadata": true,
-    "save_route_geometry": false,
+    "save_route_geometry": true,
     "summary_detail": "full",
     "audit_detail": "summary",
     "performance_profile": "basic",
     "show_progress": true,
-    "save_route_stops": true
+    "save_route_stops": true,
+    "save_m3_priority_audit": true
   },
   "facility_filter": {
     "enabled": true,
     "initial_buffer_m": 500,
     "buffer_increment_m": 500,
-    "maximum_buffer_m": 5000,
+    "maximum_buffer_m": 9000,
     "minimum_candidates": 5
   },
   "facility_assignment": {
     "pudo_capacity_mode": "unlimited",
-    "microhub_capacity_mode": "unlimited"
+    "microhub_capacity_mode": "configured"
   },
   "osrm_cache": {
     "enabled": true,
@@ -66,5 +106,9 @@
     "walking_speed_m_s": 1.2,
     "round_trip": true,
     "models": ["M1", "M2"]
+  },
+  "m3_delivery": {
+    "fallback_enabled": true,
+    "fallback_variants": ["conventional","electric"]
   }
 }

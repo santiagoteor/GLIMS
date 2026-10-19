@@ -1,11 +1,39 @@
 {
   "experiment_name": "valencia_benicalap_ils_baseline",
   "city": "valencia",
+  "models": ["M1", "M2", "M3", "M4", "M5"],
+  "vehicle_variants": ["conventional", "electric"],
+  "microhub_coverage_radius_m": 3000,
   "zones": [
-    "Benicalap:neighborhood", "Camins al Grau", "La Punta"
+    "CASTELLAR-L'OLIVERAL",
+    "PINEDO",
+    "MASSARROJOS",
+    "LA PUNTA",
+    "FAITANAR",
+    "SANT PAU",
+    "BORBOTO",
+    "LA TORRE",
+    "POBLE NOU",
+    "EL FORN D'ALCEDO",
+    "TORREFIEL",
+    "LA XEREA",
+    "EL PILAR",
+    "ARRANCAPINS",
+    "MARXALENES",
+    "LA GRAN VIA",
+    "SANT ANTONI",
+    "L'HORT DE SENABRE",
+    "LA CREU DEL GRAU",
+    "TRES FORQUES",
+    "LA CARRASCA",
+    "CIUTAT FALLERA",
+    "BENIFERRI",
+    "EL BOTANIC",
+    "CIUTAT DE LES ARTS I DE LES CIENCIES",
+    "FAVARA"
   ],
   "demand_scenario": ["low", "medium", "high"],
-  "instance_size": [100, 200, 300],
+  "instance_size": [40000,17200,8000, 2000, 1000, 300, 200, 100],
   "demand_seed": [42, 101, 202, 303, 404],
   "osrm_profile": "driving",
   "routing": {
@@ -44,18 +72,19 @@
     "audit_detail": "summary",
     "performance_profile": "basic",
     "show_progress": true,
-    "save_route_stops": true
+    "save_route_stops": true,
+    "save_m3_priority_audit": true
   },
   "facility_filter": {
     "enabled": true,
     "initial_buffer_m": 500,
     "buffer_increment_m": 500,
-    "maximum_buffer_m": 7000,
+    "maximum_buffer_m": 9000,
     "minimum_candidates": 5
   },
   "facility_assignment": {
     "pudo_capacity_mode": "unlimited",
-    "microhub_capacity_mode": "unlimited"
+    "microhub_capacity_mode": "configured"
   },
   "osrm_cache": {
     "enabled": true,
@@ -66,5 +95,9 @@
     "walking_speed_m_s": 1.2,
     "round_trip": true,
     "models": ["M1", "M2"]
+  },
+  "m3_delivery": {
+    "fallback_enabled": true,
+    "fallback_variants": ["conventional","electric"]
   }
 }

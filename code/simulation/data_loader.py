@@ -53,7 +53,7 @@ def load_city_data(
     )
     validate_required_columns(
         parameters,
-        required_columns={"modelo", "nox_km_estimado_cliente"},
+        required_columns={"modelo", "co2_km", "nox_km"},
         dataset_name="model parameters",
     )
 

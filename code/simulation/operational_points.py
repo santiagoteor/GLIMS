@@ -200,7 +200,48 @@ def get_facility_candidates(
     return candidates.dropna(
         subset=["Latitude", "Longitude"]
     )
-    
+
+
+def build_facility_name(
+    record: pd.Series,
+    fallback_name: str,
+) -> str:
+    """Return a readable facility name from the available metadata.
+
+    ``Location`` remains the preferred name to preserve the current behavior.
+    When it is missing, descriptive source metadata is used before falling
+    back to a synthetic identifier supplied by the caller.
+    """
+
+    def _clean(value) -> str:
+        if pd.isna(value):
+            return ""
+        return str(value).strip()
+
+    location = _clean(record.get("Location"))
+    if location:
+        return location
+
+    company = _clean(record.get("Company"))
+    address = _clean(record.get("Address"))
+    service_type = _clean(record.get("Record_Service_Type_Name"))
+    if not service_type:
+        service_type = _clean(record.get("Type"))
+
+    if company and address:
+        return f"{company} - {address}"
+    if company and service_type:
+        return f"{company} - {service_type}"
+    if company:
+        return company
+    if address:
+        return address
+    if service_type:
+        return service_type
+
+    return str(fallback_name).strip()
+
+
 def select_nearest_origin_facility(
     records: pd.DataFrame,
     target_latitude: float,
@@ -259,28 +300,13 @@ def select_nearest_origin_facility(
     nearest_position = int(np.argmin(distances_m))
     nearest_record = candidates.iloc[nearest_position]
 
-    location = nearest_record.get("Location")
-    company = nearest_record.get("Company")
-    address = nearest_record.get("Address")
-    service_type = nearest_record.get(
-        "Record_Service_Type_Name",
-        "Microhub facility",
+    facility_name = build_facility_name(
+        nearest_record,
+        fallback_name="Origin facility",
     )
 
-    if pd.isna(location) or not str(location).strip():
-        if pd.notna(company) and pd.notna(address):
-            facility_name = f"{company} - {address}"
-        elif pd.notna(company):
-            facility_name = str(company).strip()
-        elif pd.notna(address):
-            facility_name = str(address).strip()
-        else:
-            facility_name = str(service_type).strip()
-    else:
-        facility_name = str(location).strip()
-        
     return OperationalPoint(
-        name=facility_name or "Origin facility",
+        name=facility_name,
         latitude=float(nearest_record["Latitude"]),
         longitude=float(nearest_record["Longitude"]),
         point_type="origin_facility",
@@ -340,28 +366,13 @@ def select_nearest_microhub_facility(
     nearest_position = int(np.argmin(distances_m))
     nearest_record = candidates.iloc[nearest_position]
 
-    location = nearest_record.get("Location")
-    company = nearest_record.get("Company")
-    address = nearest_record.get("Address")
-    service_type = nearest_record.get(
-        "Record_Service_Type_Name",
-        "Microhub facility",
+    facility_name = build_facility_name(
+        nearest_record,
+        fallback_name="Microhub facility",
     )
 
-    if pd.isna(location) or not str(location).strip():
-        if pd.notna(company) and pd.notna(address):
-            facility_name = f"{company} - {address}"
-        elif pd.notna(company):
-            facility_name = str(company).strip()
-        elif pd.notna(address):
-            facility_name = str(address).strip()
-        else:
-            facility_name = str(service_type).strip()
-    else:
-        facility_name = str(location).strip()
-
     return OperationalPoint(
-        name=facility_name or "Microhub facility",
+        name=facility_name,
         latitude=float(nearest_record["Latitude"]),
         longitude=float(nearest_record["Longitude"]),
         point_type="microhub",
@@ -422,30 +433,10 @@ def select_nearest_pudo_facility(
     nearest_position = int(np.argmin(distances_m))
     nearest_record = candidates.iloc[nearest_position]
 
-    location = nearest_record.get("Location")
-    company = nearest_record.get("Company")
-    address = nearest_record.get("Address")
-    service_type = nearest_record.get(
-        "Record_Service_Type_Name",
-        "PUDO facility",
+    facility_name = build_facility_name(
+        nearest_record,
+        fallback_name="PUDO facility",
     )
-
-    if pd.isna(location) or not str(location).strip():
-        if pd.notna(company) and pd.notna(address):
-            facility_name = (
-                f"{str(company).strip()} - "
-                f"{str(address).strip()}"
-            )
-        elif pd.notna(company):
-            facility_name = str(company).strip()
-        elif pd.notna(address):
-            facility_name = str(address).strip()
-        elif pd.notna(service_type):
-            facility_name = str(service_type).strip()
-        else:
-            facility_name = "PUDO facility"
-    else:
-        facility_name = str(location).strip()
 
     return OperationalPoint(
         name=facility_name,

@@ -43,6 +43,7 @@ from code.simulation.exporters import (
 from code.simulation.runner import simulate_city
 from code.simulation.summary_report import build_summary_export
 from code.simulation.traffic import load_traffic_profile
+from code.simulation.territory_ids import resolve_territory_id, resolve_sample_id_for_zones
 from code.traffic.provider import TimeTrafficProvider
 from code.traffic.schedule import build_shift
 
@@ -406,6 +407,7 @@ SUMMARY_AUDIT_OUTPUTS = {
     "route_customer_summary",
     "unroutable_customers",
     "osrm_snapping_audit",
+    "m3_unserved_clients",
 }
 
 
@@ -433,7 +435,7 @@ def _select_audit_outputs(
             selected[audit_name] = audit_df
             continue
 
-        if audit_detail == "full" or audit_name in SUMMARY_AUDIT_OUTPUTS:
+        if audit_detail == "full" or audit_name in SUMMARY_AUDIT_OUTPUTS or audit_name == "m3_priority_audit":
             selected[audit_name] = audit_df
 
     return selected
@@ -458,6 +460,11 @@ def _run_city_experiment(
     )
     metadata_path = experiment_folder / "metadata.json"
 
+    active_sample_id = resolve_sample_id_for_zones(active_city, config.zones)
+
+    def _territory_record(neighborhood_name: str):
+        return resolve_territory_id(active_city, str(neighborhood_name), sample_id=active_sample_id)
+
     provenance_config = config.to_dict()
     provenance_config["resolved_city"] = active_city
     config_hash = hash_payload(provenance_config)
@@ -473,6 +480,12 @@ def _run_city_experiment(
         resolved_config = config.to_dict()
         resolved_config["resolved_city"] = active_city
         resolved_config["experiment_id"] = experiment_id
+        mapped = [
+            _territory_record(zone) for zone in (config.zones or [])
+        ]
+        sample_ids = {x.sample_id for x in mapped if x is not None}
+        if mapped and len(mapped) == len(config.zones or []) and len(sample_ids) == 1:
+            resolved_config["sample_id"] = next(iter(sample_ids))
         save_json(experiment_folder / "config.json", resolved_config)
 
     if config.output.save_metadata:
@@ -600,7 +613,12 @@ def _run_city_experiment(
         ) -> None:
             finished = datetime.now()
             started = finished - timedelta(seconds=float(runtime_seconds))
-            zone_slug = slugify(str(neighborhood_name))
+            territory = _territory_record(str(neighborhood_name))
+            zone_slug = (
+                territory.zone_id
+                if territory is not None
+                else slugify(str(neighborhood_name))
+            )
             zone_folder = neighborhoods_folder / zone_slug
             routes_folder = zone_folder / "routes"
             routing_folder = zone_folder / "routing"
@@ -671,6 +689,13 @@ def _run_city_experiment(
                         encoding="utf-8-sig",
                     )
 
+            if config.output.save_m3_priority_audit:
+                priority_frame = audit_details.get("m3_priority_audit")
+                if priority_frame is not None and not priority_frame.empty:
+                    priority_frame.assign(experiment_id=experiment_id).to_csv(
+                        facilities_folder / "m3_priority_audit.csv",
+                        index=False, encoding="utf-8-sig",
+                    )
             selected_audits = _select_audit_outputs(
                 audit_details,
                 audit_detail=config.output.audit_detail,
@@ -703,6 +728,8 @@ def _run_city_experiment(
             neighborhood_status_rows.append(
                 {
                     "neighborhood": neighborhood_name,
+                    "zone_id": (territory.zone_id if territory is not None else ""),
+                    "sample_id": (territory.sample_id if territory is not None else ""),
                     "zone_type": zone_type,
                     "status": "completed",
                     "runtime_seconds": float(runtime_seconds),
@@ -726,7 +753,12 @@ def _run_city_experiment(
         ) -> None:
             finished = datetime.now()
             started = finished - timedelta(seconds=float(runtime_seconds))
-            zone_slug = slugify(str(neighborhood_name))
+            territory = _territory_record(str(neighborhood_name))
+            zone_slug = (
+                territory.zone_id
+                if territory is not None
+                else slugify(str(neighborhood_name))
+            )
             zone_folder = neighborhoods_folder / zone_slug
             zone_folder.mkdir(parents=True, exist_ok=True)
 
@@ -747,6 +779,8 @@ def _run_city_experiment(
             neighborhood_status_rows.append(
                 {
                     "neighborhood": neighborhood_name,
+                    "zone_id": (territory.zone_id if territory is not None else ""),
+                    "sample_id": (territory.sample_id if territory is not None else ""),
                     "zone_type": zone_type,
                     "status": "failed",
                     "runtime_seconds": float(runtime_seconds),
@@ -760,6 +794,22 @@ def _run_city_experiment(
                 f"Failure metadata saved for neighborhood "
                 f"{neighborhood_name!r}; continuing with the next zone."
             )
+
+        def _save_skipped_neighborhood(*, neighborhood_name, zone_type, runtime_seconds) -> None:
+            territory = _territory_record(str(neighborhood_name))
+            neighborhood_status_rows.append(
+                {
+                    "neighborhood": neighborhood_name,
+                    "zone_id": (territory.zone_id if territory is not None else ""),
+                    "sample_id": (territory.sample_id if territory is not None else ""),
+                    "zone_type": zone_type,
+                    "status": "skipped_no_demand",
+                    "runtime_seconds": float(runtime_seconds),
+                    "error": "",
+                    "folder": "",
+                }
+            )
+            _write_neighborhood_status()
 
         results_df, model_detail_frames, audit_frames = simulate_city(
             city=active_city,
@@ -788,9 +838,16 @@ def _run_city_experiment(
             microhub_capacity_mode=(
                 config.facility_assignment.microhub_capacity_mode
             ),
+            selected_models=tuple(config.models),
+            vehicle_variants=tuple(config.vehicle_variants),
+            microhub_coverage_radius_m=config.microhub_coverage_radius_m,
+            m3_fallback_enabled=config.m3_delivery.fallback_enabled,
+            m3_fallback_variants=tuple(config.m3_delivery.fallback_variants),
+            save_m3_priority_audit=config.output.save_m3_priority_audit,
             show_progress=config.output.show_progress,
             zone_result_callback=_save_completed_neighborhood,
             zone_failure_callback=_save_failed_neighborhood,
+            zone_skipped_callback=_save_skipped_neighborhood,
             continue_on_zone_error=True,
         )
 
@@ -944,6 +1001,17 @@ def _run_city_experiment(
             for row in neighborhood_status_rows
         )
 
+        skipped_zone_count = sum(
+            row["status"] == "skipped_no_demand"
+            for row in neighborhood_status_rows
+        )
+        requested_zone_count = len(neighborhood_status_rows)
+        print(
+            "Zone status: "
+            f"requested={requested_zone_count}, completed={completed_zone_count}, "
+            f"skipped_no_demand={skipped_zone_count}, failed={failed_zone_count}"
+        )
+
         if failed_zone_count == 0:
             experiment_status = "completed"
         elif completed_zone_count > 0:
@@ -954,7 +1022,8 @@ def _run_city_experiment(
         if config.output.save_metadata:
             save_json(
                 metadata_path,
-                build_metadata(
+                {
+                    **build_metadata(
                     experiment_id=experiment_id,
                     started_at=started_at,
                     finished_at=finished_at,
@@ -966,7 +1035,12 @@ def _run_city_experiment(
                     ),
                     config_hash=config_hash,
                     demand_file=demand_file,
-                ),
+                    ),
+                    "zones_requested": requested_zone_count,
+                    "zones_completed": completed_zone_count,
+                    "zones_skipped_no_demand": skipped_zone_count,
+                    "zones_failed": failed_zone_count,
+                },
             )
         print(
             f"\nExperiment completed. Results saved to: "

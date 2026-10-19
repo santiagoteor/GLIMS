@@ -65,6 +65,13 @@ class FacilityAssignmentExperimentConfig:
 
 
 @dataclass(frozen=True)
+class M3DeliveryExperimentConfig:
+    # Disabled preserves the legacy M3 behavior and its exclusion audit.
+    fallback_enabled: bool = False
+    fallback_variants: list[str] = field(default_factory=lambda: ["conventional", "electric"])
+
+
+@dataclass(frozen=True)
 class OsrmCacheExperimentConfig:
     enabled: bool = False
     directory: str = ".glims_cache/osrm"
@@ -74,6 +81,7 @@ class OsrmCacheExperimentConfig:
 class OutputExperimentConfig:
     save_route_details: bool = True
     save_route_stops: bool = True
+    save_m3_priority_audit: bool = False
     save_configuration: bool = True
     save_metadata: bool = True
     save_route_geometry: bool = False
@@ -87,6 +95,9 @@ class ExperimentConfig:
     experiment_name: str = "glims_experiment"
     city: str = "madrid"
     zones: list[str] | None = None
+    models: list[str] = field(default_factory=lambda: ["M1", "M2", "M3", "M4", "M5"])
+    vehicle_variants: list[str] = field(default_factory=lambda: ["electric", "conventional"])
+    microhub_coverage_radius_m: float = 3000.0
     demand_scenario: str | list[str] = "medium"
     instance_size: int | list[int] = 100
     demand_seed: int | list[int] | None = None
@@ -107,6 +118,7 @@ class ExperimentConfig:
     facility_assignment: FacilityAssignmentExperimentConfig = field(
         default_factory=FacilityAssignmentExperimentConfig
     )
+    m3_delivery: M3DeliveryExperimentConfig = field(default_factory=M3DeliveryExperimentConfig)
     osrm_cache: OsrmCacheExperimentConfig = field(
         default_factory=OsrmCacheExperimentConfig
     )
@@ -136,6 +148,9 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         ),
         city=str(raw.get("city", "madrid")),
         zones=_normalize_zones(raw.get("zones")),
+        models=raw.get("models", ["M1", "M2", "M3", "M4", "M5"]),
+        vehicle_variants=raw.get("vehicle_variants", ["electric", "conventional"]),
+        microhub_coverage_radius_m=raw.get("microhub_coverage_radius_m", 3000.0),
         demand_scenario=_normalize_scenario_value(
             raw.get("demand_scenario", "medium")
         ),
@@ -163,6 +178,7 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         facility_assignment=FacilityAssignmentExperimentConfig(
             **raw.get("facility_assignment", {})
         ),
+        m3_delivery=M3DeliveryExperimentConfig(**raw.get("m3_delivery", {})),
         osrm_cache=OsrmCacheExperimentConfig(
             **raw.get("osrm_cache", {})
         ),
@@ -173,6 +189,26 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
 
 
 def validate_experiment_config(config: ExperimentConfig) -> None:
+    if not isinstance(config.m3_delivery.fallback_enabled, bool):
+        raise ValueError("m3_delivery.fallback_enabled must be boolean")
+    variants = config.m3_delivery.fallback_variants
+    if (not isinstance(variants, list) or not variants
+            or any(v not in ("conventional", "electric") for v in variants)
+            or len(variants) != len(set(variants))):
+        raise ValueError("m3_delivery.fallback_variants must be unique conventional/electric values")
+    if config.m3_delivery.fallback_enabled and not set(variants).issubset(set(config.vehicle_variants)):
+        raise ValueError("M3 fallback variants must be included in vehicle_variants")
+
+    if not isinstance(config.models, list) or not config.models or any(
+        not isinstance(x, str) for x in config.models
+    ) or len(set(config.models)) != len(config.models) or set(config.models) - {"M1", "M2", "M3", "M4", "M5"}:
+        raise ValueError("models must be a nonempty list of unique M1-M5 codes.")
+    if not isinstance(config.vehicle_variants, list) or not config.vehicle_variants or any(
+        not isinstance(x, str) for x in config.vehicle_variants
+    ) or len(set(config.vehicle_variants)) != len(config.vehicle_variants) or set(config.vehicle_variants) - {"electric", "conventional"}:
+        raise ValueError("vehicle_variants must contain electric and/or conventional without duplicates.")
+    if not isinstance(config.microhub_coverage_radius_m, (int, float)) or config.microhub_coverage_radius_m <= 0:
+        raise ValueError("microhub_coverage_radius_m must be positive.")
     if config.city not in {*CITIES, "all"}:
         raise ValueError(
             f"Unsupported city {config.city!r}. Expected one of "
@@ -517,6 +553,7 @@ def resolve_experiment_config(
     output = OutputExperimentConfig(
         save_route_details=base.output.save_route_details,
         save_route_stops=base.output.save_route_stops,
+        save_m3_priority_audit=base.output.save_m3_priority_audit,
         save_configuration=base.output.save_configuration,
         save_metadata=base.output.save_metadata,
         save_route_geometry=_pick(
@@ -532,6 +569,9 @@ def resolve_experiment_config(
         experiment_name=base.experiment_name,
         city=_pick(overrides.get("city"), base.city),
         zones=_pick(overrides.get("zones"), base.zones),
+        models=base.models,
+        vehicle_variants=base.vehicle_variants,
+        microhub_coverage_radius_m=base.microhub_coverage_radius_m,
         demand_scenario=_pick(
             overrides.get("demand_scenario"),
             base.demand_scenario,
@@ -558,6 +598,7 @@ def resolve_experiment_config(
         output=output,
         facility_filter=base.facility_filter,
         facility_assignment=base.facility_assignment,
+        m3_delivery=base.m3_delivery,
         osrm_cache=base.osrm_cache,
     )
     validate_experiment_config(resolved)

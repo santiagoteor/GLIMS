@@ -37,6 +37,7 @@ SINGLE_VALUE_COLUMNS = {
     "Has_Last_Mile_Station",
     "Has_Warehouse",
     "Has_Convenience_Store",
+    "Has_Microhub",
     "Has_Unknown",
     "Cluster_Service_Type_Code",
     "Cluster_Service_Type_Name",

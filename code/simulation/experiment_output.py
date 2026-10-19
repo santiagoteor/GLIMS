@@ -10,6 +10,7 @@ import subprocess
 from typing import Any
 
 from code.simulation.experiment_config import ExperimentConfig
+from code.simulation.territory_ids import resolve_sample_id_for_zones
 
 
 def create_experiment_directory(
@@ -20,18 +21,31 @@ def create_experiment_directory(
     started_at: datetime,
 ) -> tuple[str, Path]:
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
-    zone_label = (
-        "all_zones"
-        if not config.zones
-        else "_".join(slugify(zone) for zone in config.zones)
-    )
-    id_parts = [
-        timestamp,
-        zone_label,
-        slugify(config.demand_scenario),
-        str(config.instance_size),
-        slugify(config.routing.algorithm),
-    ]
+    sample_id = resolve_sample_id_for_zones(city, config.zones)
+
+    # For frozen territorial samples the human neighborhood names are kept in
+    # metadata/config only, not in filesystem paths. Historical/unmapped runs
+    # retain the original naming convention for backward compatibility.
+    if sample_id is not None:
+        id_parts = [
+            timestamp,
+            slugify(config.demand_scenario),
+            str(config.instance_size),
+            slugify(config.routing.algorithm),
+        ]
+    else:
+        zone_label = (
+            "all_zones"
+            if not config.zones
+            else "_".join(slugify(zone) for zone in config.zones)
+        )
+        id_parts = [
+            timestamp,
+            zone_label,
+            slugify(config.demand_scenario),
+            str(config.instance_size),
+            slugify(config.routing.algorithm),
+        ]
     if (
         config.routing.algorithm == "ils"
         and isinstance(config.routing.ils_random_seed, int)
@@ -42,7 +56,12 @@ def create_experiment_directory(
         id_parts.append(f"dseed{config.demand_seed}")
 
     experiment_id = "_".join(id_parts)
-    folder = results_root / "experiments" / slugify(city) / experiment_id
+    city_root = results_root / "experiments" / slugify(city)
+    folder = (
+        city_root / slugify(sample_id) / experiment_id
+        if sample_id is not None
+        else city_root / experiment_id
+    )
     (folder / "routes").mkdir(parents=True, exist_ok=False)
     (folder / "routing").mkdir(parents=True, exist_ok=False)
     (folder / "facilities").mkdir(parents=True, exist_ok=False)
