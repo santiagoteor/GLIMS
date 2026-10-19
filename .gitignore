@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 **/__pycache__/
+*.pyc
 
 # Jupyter
 .ipynb_checkpoints/
@@ -72,3 +73,7 @@ data/external/
 # Machine learning models
 code/ml/
 data/ml/
+
+*.zip
+
+*.egg.info/

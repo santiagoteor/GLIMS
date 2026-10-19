@@ -9,7 +9,10 @@ from tqdm.auto import tqdm
 
 from code.routing.osrm_client import osrm_distance_duration_table_rectangular
 
-from code.simulation.operational_points import get_facility_candidates
+from code.simulation.operational_points import (
+    build_facility_name,
+    get_facility_candidates,
+)
 
 def filter_points_by_neighborhood(points: pd.DataFrame, neighborhood) -> pd.DataFrame:
     """Filter points that fall inside the zone polygon."""
@@ -35,15 +38,6 @@ def load_facility_candidates(
         records=classified_locations,
         allowed_service_codes=MICROHUB_FACILITY_CODES,
     ).reset_index(drop=True)
-    
-    print(
-        microhubs[
-            ["Location", "Latitude", "Longitude"]
-        ]
-        .drop_duplicates(
-            subset=["Latitude", "Longitude"]
-        )
-    )
 
     pudos = get_facility_candidates(
         records=classified_locations,
@@ -74,6 +68,10 @@ def assign_customers_to_nearest_facility(
     facility_name_column: str = "Location",
     show_progress: bool = False,
     progress_label: str = "Assigning customers to facilities",
+    max_haversine_distance_m: float | None = None,
+    allow_unassigned: bool = False,
+    priority_nearest_first: bool = False,
+    priority_audit_rows: list[dict] | None = None,
 ) -> pd.DataFrame:
     """
     Assign each customer to the nearest facility using OSRM road distances.
@@ -139,6 +137,12 @@ def assign_customers_to_nearest_facility(
         )
     )
 
+    if max_haversine_distance_m is not None:
+        from code.simulation.m3_eligibility import _distances
+        eligible_distances = _distances(customers, facilities)
+        facility_distances = np.where(eligible_distances <= max_haversine_distance_m,
+                                      facility_distances, np.inf)
+
     customer_count = len(customers)
 
     ordered_facilities = np.argsort(
@@ -161,10 +165,13 @@ def assign_customers_to_nearest_facility(
         | facility_names.eq("")
     )
 
-    fallback_names = pd.Series(
+    descriptive_fallback_names = pd.Series(
         [
-            f"facility_{facility_index}"
-            for facility_index in facilities.index
+            build_facility_name(
+                row,
+                fallback_name=f"facility_{facility_index}",
+            )
+            for facility_index, row in facilities.iterrows()
         ],
         index=facilities.index,
         dtype="string",
@@ -172,8 +179,24 @@ def assign_customers_to_nearest_facility(
 
     facility_names = facility_names.mask(
         missing_names,
-        fallback_names,
+        descriptive_fallback_names,
     )
+
+    # Keep generated names unique without changing existing Location values.
+    # This prevents two facilities with identical descriptive metadata from
+    # being merged downstream when facility names are used as dictionary keys.
+    duplicate_generated_names = (
+        missing_names
+        & facility_names.duplicated(keep=False)
+    )
+    if duplicate_generated_names.any():
+        facility_names.loc[duplicate_generated_names] = [
+            f"{facility_names.loc[facility_index]} "
+            f"[facility_{facility_index}]"
+            for facility_index in facilities.index[
+                duplicate_generated_names
+            ]
+        ]
 
     # ------------------------------------------------------------
     # Assignment
@@ -194,23 +217,28 @@ def assign_customers_to_nearest_facility(
                 "facility_capacity must be greater than zero."
             )
 
-    assigned_facility = np.empty(
-        customer_count,
-        dtype=object,
-    )
+    assigned_facility = np.full(customer_count, None, dtype=object)
 
-    assigned_latitude = np.empty(
-        customer_count,
-        dtype=float,
-    )
+    assigned_latitude = np.full(customer_count, np.nan, dtype=float)
 
-    assigned_longitude = np.empty(
-        customer_count,
-        dtype=float,
-    )
+    assigned_longitude = np.full(customer_count, np.nan, dtype=float)
+
+    # For capacity-limited M3, process customers by nearest eligible
+    # Haversine distance. Stable sorting preserves original registration order.
+    processing_order = np.arange(customer_count)
+    if priority_nearest_first and capacity_limited:
+        from code.simulation.m3_eligibility import _distances
+        geo_distances = _distances(customers, facilities)
+        if max_haversine_distance_m is not None:
+            geo_distances = np.where(
+                geo_distances <= max_haversine_distance_m, geo_distances, np.inf
+            )
+        processing_order = np.argsort(
+            np.min(geo_distances, axis=1), kind="stable"
+        )
 
     customer_indices = tqdm(
-        range(customer_count),
+        processing_order,
         desc=progress_label,
         unit="customer",
         disable=not show_progress,
@@ -218,7 +246,25 @@ def assign_customers_to_nearest_facility(
         leave=False,
     )
 
-    for customer_idx in customer_indices:
+    for priority_rank, customer_idx in enumerate(customer_indices, start=1):
+
+        eligible_facilities = [
+            int(i) for i in ordered_facilities[customer_idx]
+            if np.isfinite(facility_distances[customer_idx, i])
+        ]
+        nearest_idx = eligible_facilities[0] if eligible_facilities else None
+        nearest_geo_distance = None
+        if priority_audit_rows is not None:
+            from code.simulation.m3_eligibility import _distances
+            # Computed once per customer; does not change routing decisions.
+            if nearest_idx is not None:
+                nearest_geo_distance = float(np.min(
+                    _distances(customers.iloc[[customer_idx]], facilities.iloc[eligible_facilities])
+                ))
+        capacity_before = (
+            float(facility_capacity - facility_load[nearest_idx])
+            if capacity_limited and nearest_idx is not None else None
+        )
 
         demand = float(
             customers.iloc[customer_idx]["Demand"]
@@ -227,6 +273,8 @@ def assign_customers_to_nearest_facility(
         assigned = False
 
         for facility_idx in ordered_facilities[customer_idx]:
+            if not np.isfinite(facility_distances[customer_idx, facility_idx]):
+                continue
 
             capacity_available = (
                 not capacity_limited
@@ -256,7 +304,30 @@ def assign_customers_to_nearest_facility(
             assigned = True
             break
 
-        if not assigned:
+        if priority_audit_rows is not None:
+            selected = assigned_facility[customer_idx]
+            selected_idx = next(
+                (int(i) for i in eligible_facilities
+                 if str(facility_names.iloc[i]) == str(selected)), None
+            ) if assigned else None
+            priority_audit_rows.append({
+                "customer_row_position": int(customer_idx),
+                "customer_id": str(customers.iloc[customer_idx].get("customer_id",
+                    customers.iloc[customer_idx].get("Customer_ID",
+                    customers.iloc[customer_idx].get("ID", customer_idx)))),
+                "priority_rank": int(priority_rank),
+                "packages": float(demand),
+                "microhub_id": str(facility_names.iloc[selected_idx]) if selected_idx is not None else (str(facility_names.iloc[nearest_idx]) if nearest_idx is not None else ""),
+                "nearest_eligible_microhub": str(facility_names.iloc[nearest_idx]) if nearest_idx is not None else "",
+                "distance_m": nearest_geo_distance,
+                "assigned_microhub": str(selected) if assigned else "",
+                "capacity_before": capacity_before,
+                "capacity_after": (float(facility_capacity - facility_load[selected_idx]) if capacity_limited and selected_idx is not None else capacity_before),
+                "decision": "accepted" if assigned else "rejected",
+                "reason": "accepted" if assigned else ("capacity_insufficient" if eligible_facilities else "outside_microhub_coverage"),
+            })
+
+        if not assigned and not allow_unassigned:
             raise ValueError(
                 "No facility with enough remaining capacity "
                 f"for customer {customer_idx}. "

@@ -12,6 +12,7 @@ COMPACT_COLUMNS = [
     "ciudad",
     "barrio",
     "model_code",
+    "supply_vehicle_type",
     "modelo",
     "paquetes",
     "centro_logistico",
@@ -38,6 +39,19 @@ COMPACT_COLUMNS = [
 ]
 
 FULL_EXTRA_COLUMNS = [
+    "supply_vehicle_co2_kg",
+    "supply_vehicle_nox_kg",
+    "microhub_coverage_radius_m",
+    "microhub_customers_total",
+    "microhub_customers_covered",
+    "microhub_customers_uncovered",
+    "microhub_customer_coverage_pct",
+    "microhub_packages_total",
+    "microhub_packages_covered",
+    "microhub_packages_uncovered",
+    "microhub_package_coverage_pct",
+    "microhub_nearest_distance_m_mean",
+    "microhub_coverage_is_enforced",
     "costo_distancia_eur",
     "costo_laboral_eur",
     "costo_facility_fijo_eur",

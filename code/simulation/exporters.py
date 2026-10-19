@@ -237,6 +237,9 @@ def build_route_stops_frame(
                         "vehicle_type": route_row.get(
                             "vehicle_type", ""
                         ),
+                        "supply_vehicle_type": route_row.get(
+                            "supply_vehicle_type", ""
+                        ),
                         "depot": route_row.get("depot", ""),
                         "stop_position": position,
                         "stop_type": stop_type,
@@ -343,14 +346,25 @@ def build_facility_summary_frame(
                 last_mile_routes["depot"].dropna().astype(str)
             )
 
+        # Each vehicle variant is an independent experimental scenario.
+        # Never add conventional and electric loads into a single facility row.
+        variants = sorted(set(
+            detail_df.get("supply_vehicle_type", pd.Series(dtype=str))
+            .fillna("").astype(str)
+        )) or [""]
         for facility_name in sorted(facility_names):
+          for variant in variants:
             supply_for_facility = supply_stops.loc[
                 supply_stops["stop_id"].astype(str).eq(facility_name)
+                & supply_stops["supply_vehicle_type"].fillna("").astype(str).eq(variant)
             ].copy()
 
             last_mile_for_facility = last_mile_routes.loc[
                 last_mile_routes["depot"].astype(str).eq(facility_name)
+                & last_mile_routes["supply_vehicle_type"].fillna("").astype(str).eq(variant)
             ].copy()
+            if supply_for_facility.empty and last_mile_for_facility.empty:
+                continue
 
             latitude = pd.NA
             longitude = pd.NA
@@ -433,6 +447,7 @@ def build_facility_summary_frame(
                 route_stops["model"].eq(model_code)
                 & route_stops["leg"].eq(last_mile_leg)
                 & route_stops["depot"].astype(str).eq(facility_name)
+                & route_stops["supply_vehicle_type"].fillna("").astype(str).eq(variant)
             ].copy()
             lm_service_ends = pd.to_datetime(
                 lm_stops.get(
@@ -458,6 +473,7 @@ def build_facility_summary_frame(
                     "city": sample.get("city", ""),
                     "neighborhood": sample.get("neighborhood", ""),
                     "model": model_code,
+                    "supply_vehicle_type": variant,
                     "facility_name": facility_name,
                     "facility_type": facility_type,
                     "latitude": latitude,
