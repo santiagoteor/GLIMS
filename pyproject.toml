@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "glims-core"
+version = "0.1.0"
+description = "Core simulation and routing components of GLIMS"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "pandas",
+    "geopandas",
+    "shapely",
+    "requests",
+    "scipy",
+    "networkx",
+    "openpyxl",
+    "tqdm"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "glims",
+    "glims.common",
+    "glims.routing",
+    "glims.simulation",
+    "glims.traffic"
+]

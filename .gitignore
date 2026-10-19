@@ -76,4 +76,7 @@ data/ml/
 
 *.zip
 
-*.egg.info/
+# Python packaging artifacts
+build/
+dist/
+*.egg-info/
